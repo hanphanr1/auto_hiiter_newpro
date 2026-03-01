@@ -1,6 +1,6 @@
-# Telegram Bot – CC Filter & Auto Hitter
+# TPTTH PRIVATE HITTER – CC Filter & Auto Hitter
 
-Bot Telegram gồm **2 tính năng chính**: lọc CC từ text/file và Auto Hitter Stripe (kèm gen thẻ từ BIN).
+Bot Telegram by **@idkbroo_fr** gồm **2 tính năng chính**: lọc CC từ text/file và Auto Hitter Stripe (kèm gen thẻ từ BIN).
 
 ## Tính năng 1: Lọc CC (Filter)
 

@@ -22,6 +22,51 @@ router = Router()
 def _sym(c: str) -> str:
     return {"USD": "$", "EUR": "€", "GBP": "£", "INR": "₹", "JPY": "¥"}.get(c, "")
 
+def _status_line(r: dict) -> str:
+    """Format status like UsagiAutoCO: Live ✅ (code) or Dead (code) ❌ or Stopped ❌"""
+    st = (r.get("status") or "").upper()
+    msg = (r.get("response") or "").strip().lower()
+    if st == "CHARGED":
+        return "Live ✅ (charged)"
+    if st == "DECLINED":
+        if "integration surface" in msg or "unsupported for publishable key" in msg:
+            return "Dead (unsupported_integration) ❌"
+        code = ""
+        resp = (r.get("response") or "").strip()
+        if resp and ":" in resp:
+            code = resp.split(":", 1)[0].strip().lower().replace(" ", "_")[:30]
+        return f"Dead ({code}) ❌" if code else "Dead ❌"
+    if st == "3DS":
+        return "Dead ❌"
+    if st in ("ERROR", "FAILED"):
+        return "Dead ❌"
+    if "no longer active" in msg or ("session" in msg and "active" in msg):
+        return "Stopped ❌"
+    return "Dead ❌"
+
+def _format_co_report(checkout: dict, results: list, total_time: float, price_str: str) -> str:
+    site_name = checkout.get("merchant") or "N/A"
+    site_url = checkout.get("url") or ""
+    site_line = f"{site_name} ({site_url})" if site_url else site_name
+    lines = [
+        "TPTTH PRIVATE HITTER",
+        "—  —  —  —  —",
+        f"Sɪᴛᴇ: {site_line}",
+        f"Aᴍᴏᴜɴᴛ: {price_str}",
+        f"Cᴀʀᴅs: {len(results)}",
+        "━━━━━━━━━━━━━━━━━━━━━━━━━━",
+    ]
+    for i, r in enumerate(results, 1):
+        lines.append(f"Card #{i}:")
+        lines.append(r["card"])
+        lines.append(f"Sᴛᴀᴛᴜs: {_status_line(r)}")
+        lines.append(f"Message: {r.get('response') or 'N/A'}")
+        lines.append(f"Tɪᴍᴇ: {r.get('time', 0)}s")
+        lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━")
+    lines.append("Aʟʟ ᴄᴀʀᴅs ᴘʀᴏᴄᴇssᴇᴅ sᴜᴄᴄᴇssғᴜʟʟʏ")
+    lines.append("Bʏ: @idkbroo_fr")
+    return "\n".join(lines)
+
 @router.message(Command("co"))
 async def cmd_co(msg: Message):
     text = (msg.text or "").strip()
@@ -30,11 +75,16 @@ async def cmd_co(msg: Message):
 
     if len(parts) < 2:
         await msg.answer(
-            "Cách dùng:\n"
-            "• <code>/co &lt;url_stripe&gt;</code> – Parse checkout\n"
-            "• <code>/co &lt;url&gt; cc|mm|yy|cvv</code> – Charge 1 thẻ\n"
-            "• <code>/co &lt;url&gt; bin &lt;BIN&gt; [số_lượng]</code> – Hit thẻ gen từ BIN\n\n"
-            "Proxy tự dùng từ /addproxy (nếu có).",
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "  <b>TPTTH PRIVATE HITTER</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+            "🔹 <code>/co &lt;url&gt;</code> — Parse checkout\n"
+            "🔹 <code>/co &lt;url&gt; cc|mm|yy|cvv</code> — Hit 1 thẻ\n"
+            "🔹 <code>/co &lt;url&gt; bin &lt;BIN&gt; [n]</code> — Gen & hit\n\n"
+            "Proxy auto từ <code>/addproxy</code>\n\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            "  <b>by @idkbroo_fr</b>\n"
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━",
             parse_mode=ParseMode.HTML,
         )
         return
@@ -69,11 +119,16 @@ async def cmd_co(msg: Message):
     proxy_url = get_random_proxy_url(uid)
     proxy_label = "Proxy: ON" if proxy_url else "No proxy"
 
-    status_msg = await msg.answer(f"⏳ Parsing checkout... ({proxy_label})")
+    status_msg = await msg.answer(f"⏳ Đang parse checkout...\n🔌 {proxy_label}")
     checkout = await get_checkout_info(url, proxy_url=proxy_url)
 
     if checkout.get("error"):
-        await status_msg.edit_text(f"❌ Lỗi: {checkout['error']}")
+        await status_msg.edit_text(
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"❌ <b>Error</b>\n{checkout['error']}\n"
+            f"━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            parse_mode=ParseMode.HTML,
+        )
         return
 
     price = checkout.get("price") or 0
@@ -82,7 +137,12 @@ async def cmd_co(msg: Message):
 
     if not cards:
         info_lines = [
-            f"✅ <b>Checkout</b> {price_str}",
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            "  <b>TPTTH PRIVATE HITTER</b>",
+            "━━━━━━━━━━━━━━━━━━━━━━━━━━",
+            "",
+            f"✅ <b>Checkout Parsed</b> — {price_str}",
+            "",
             f"🏪 Merchant: {checkout.get('merchant') or 'N/A'}",
             f"📦 Product: {checkout.get('product') or 'N/A'}",
             f"🌍 Country: {checkout.get('country') or 'N/A'}",
@@ -95,12 +155,19 @@ async def cmd_co(msg: Message):
         info_lines.append(f"🔑 PK: <code>{(checkout.get('pk') or '')[:24]}...</code>")
         info_lines.append(f"🎫 CS: <code>{checkout.get('cs') or ''}</code>")
         info_lines.append(f"🔌 {proxy_label}")
+        info_lines.append("")
+        info_lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━")
+        info_lines.append("  <b>by @idkbroo_fr</b>")
+        info_lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━")
         await status_msg.edit_text("\n".join(info_lines), parse_mode=ParseMode.HTML)
         return
 
-    mode_str = "BIN gen" if bin_mode else "CC list"
+    mode_str = "BIN Gen" if bin_mode else "CC List"
     await status_msg.edit_text(
-        f"🔄 Charging {price_str} – {len(cards)} thẻ ({mode_str})\n🔌 {proxy_label}"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"🔄 Hitting {price_str} — {len(cards)} cards ({mode_str})\n"
+        f"🔌 {proxy_label}\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━━━━━"
     )
 
     start = time.perf_counter()
@@ -118,8 +185,11 @@ async def cmd_co(msg: Message):
             declined_n = sum(1 for x in results if x["status"] == "DECLINED")
             try:
                 await status_msg.edit_text(
-                    f"🔄 {i+1}/{len(cards)} – {price_str}\n"
-                    f"✅ {charged_n} | ❌ {declined_n} | 🔌 {proxy_label}"
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    f"🔄 {i+1}/{len(cards)} — {price_str}\n"
+                    f"✅ {charged_n}  ❌ {declined_n}\n"
+                    f"🔌 {proxy_label}\n"
+                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━"
                 )
             except Exception:
                 pass
@@ -130,26 +200,13 @@ async def cmd_co(msg: Message):
     three_ds = sum(1 for x in results if x["status"] == "3DS")
     errors = sum(1 for x in results if x["status"] in ("ERROR", "FAILED"))
 
+    out = _format_co_report(checkout, results, total_time, price_str)
     if charged_one:
-        out = (
-            f"🟢 <b>CHARGED</b> {price_str}\n"
-            f"💳 <code>{charged_one['card']}</code>\n"
-            f"🏪 {checkout.get('merchant') or 'N/A'}\n"
-            f"⏱ {charged_one['time']}s | Tổng {total_time}s\n"
-            f"📊 Thử: {len(results)} | ✅ {charged_n} | ❌ {declined_n} | 🔐 {three_ds}\n"
-            f"🔌 {proxy_label}"
-        )
-    else:
-        out = (
-            f"📊 <b>Kết quả</b> {price_str}\n"
-            f"🏪 {checkout.get('merchant') or 'N/A'}\n"
-            f"Thử: {len(results)} | ✅ {charged_n} | ❌ {declined_n} | 🔐 {three_ds}"
-        )
-        if errors:
-            out += f" | ⚠️ {errors}"
-        out += f"\n⏱ {total_time}s | 🔌 {proxy_label}"
-        if results:
-            r = results[-1]
-            out += f"\n\nCuối: <code>{r['card']}</code>\n{r['status']}: {r['response']}"
+        out = f"🟢 <b>CHARGED</b> {price_str}\n\n" + out
+    summary = f"\n\n📊 ✅ {charged_n}  ❌ {declined_n}  🔐 {three_ds}"
+    if errors:
+        summary += f"  ⚠️ {errors}"
+    summary += f"\n⏱ {total_time}s  🔌 {proxy_label}"
+    out += summary
 
     await status_msg.edit_text(out, parse_mode=ParseMode.HTML)

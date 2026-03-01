@@ -6,27 +6,31 @@ from aiogram.enums import ParseMode
 
 router = Router()
 
-HELP_TEXT = """<b>Bot Telegram – CC Filter & Auto Hitter</b>
+HELP_TEXT = """━━━━━━━━━━━━━━━━━━━━━━━━━━
+  <b>TPTTH PRIVATE HITTER</b>
+  <i>CC Filter & Auto Hitter</i>
+━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-<b>1. Lọc CC</b>
-• Gửi <b>file .txt</b> chứa CC → Bot lọc ra <code>cc|mm|yy|cvv</code>, trả file .txt
-• Gửi <b>text</b> có CC → Bot reply các dòng CC
+🔹 <b>CC FILTER</b>
+├ Gửi <b>file .txt</b> → Lọc ra <code>cc|mm|yy|cvv</code>, trả file
+├ Gửi <b>text</b> có CC → Reply các dòng CC
+└ Tự nhận diện mọi format
 
-<b>2. Auto Hitter (Stripe)</b>
-• <code>/co &lt;url&gt;</code> – Parse checkout
-• <code>/co &lt;url&gt; cc|mm|yy|cvv</code> – Charge 1 thẻ
-• <code>/co &lt;url&gt; bin &lt;BIN&gt; [n]</code> – Gen thẻ từ BIN & hit (tối đa 50)
+🔹 <b>AUTO HITTER</b>
+├ <code>/co &lt;url&gt;</code> — Parse checkout info
+├ <code>/co &lt;url&gt; cc|mm|yy|cvv</code> — Hit 1 thẻ
+├ <code>/co &lt;url&gt; bin &lt;BIN&gt; [n]</code> — Gen & hit (max 50)
+└ Auto retry, random billing, anti-fraud bypass
 
-<b>3. Proxy</b>
-• <code>/addproxy host:port:user:pass</code> – Thêm proxy (tự check alive)
-• <code>/removeproxy all</code> – Xóa hết proxy
-• <code>/proxy</code> – Xem proxy | <code>/proxy check</code> – Check alive
+🔹 <b>PROXY</b>
+├ <code>/addproxy host:port:user:pass</code> — Add (auto check)
+├ <code>/removeproxy all</code> — Remove all
+├ <code>/proxy</code> — List | <code>/proxy check</code> — Check alive
+└ Auto-rotate khi hit
 
-<b>Tính năng nâng cao:</b>
-• Proxy auto-rotate khi hit
-• Random billing address / user-agent / timezone (bypass anti-fraud)
-• Luhn card gen từ BIN (như UsagiAutoX / TPropaganda)
-• Retry tự động khi disconnect/timeout"""
+━━━━━━━━━━━━━━━━━━━━━━━━━━
+  <b>by @idkbroo_fr</b>
+━━━━━━━━━━━━━━━━━━━━━━━━━━"""
 
 @router.message(Command("start"))
 async def cmd_start(msg: Message):
