@@ -66,6 +66,7 @@ def _is_surface_error(data: dict) -> bool:
         or "created by checkout" in msg
         or "not allowed for checkout session" in msg
         or code == "resource_missing"
+        or code == "parameter_unknown"
     )
 
 
@@ -250,7 +251,6 @@ async def _method_direct_pages(s, card, pk, cs, init_data, headers, proxy_url, c
         f"&last_displayed_line_item_group_details[total_discount_amount]=0"
         f"&last_displayed_line_item_group_details[shipping_rate_amount]=0"
         f"&expected_payment_method_type=card&key={pk}&init_checksum={checksum}"
-        f"{_anti_3ds_params()}"
     )
     async with s.post(
         f"https://api.stripe.com/v1/payment_pages/{cs}/confirm",
@@ -367,7 +367,6 @@ async def _method_pm_pages(s, card, pk, cs, init_data, headers, proxy_url, count
         f"&last_displayed_line_item_group_details[total_discount_amount]=0"
         f"&last_displayed_line_item_group_details[shipping_rate_amount]=0"
         f"&expected_payment_method_type=card&key={pk}&init_checksum={checksum}"
-        f"{_anti_3ds_params()}"
     )
     async with s.post(
         f"https://api.stripe.com/v1/payment_pages/{cs}/confirm",
