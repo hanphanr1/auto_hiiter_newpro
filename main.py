@@ -1,6 +1,5 @@
 # -*- coding: utf-8 -*-
 import asyncio
-import os
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
@@ -19,9 +18,8 @@ async def main():
     try:
         await dp.start_polling(bot, skip_updates=True)
     finally:
-        from hitter.stripe_charge import _session
-        if _session and not _session.closed:
-            await _session.close()
+        from hitter.stripe_charge import close_session
+        await close_session()
 
 if __name__ == "__main__":
     asyncio.run(main())

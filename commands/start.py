@@ -6,19 +6,27 @@ from aiogram.enums import ParseMode
 
 router = Router()
 
-HELP_TEXT = """<b>🤖 Bot Telegram – CC Filter & Auto Hitter</b>
+HELP_TEXT = """<b>Bot Telegram – CC Filter & Auto Hitter</b>
 
-<b>📌 Tính năng 1 – Lọc CC</b>
-• Gửi <b>file .txt</b> chứa CC (hoặc text kiểu CHARGED/Approved) → Bot lọc ra dòng <code>cc|mm|yy|cvv</code> và trả file .txt hoặc text.
-• Gửi <b>text</b> (1–2 tin) có CC → Bot trả lời bằng text chỉ gồm các dòng CC.
+<b>1. Lọc CC</b>
+• Gửi <b>file .txt</b> chứa CC → Bot lọc ra <code>cc|mm|yy|cvv</code>, trả file .txt
+• Gửi <b>text</b> có CC → Bot reply các dòng CC
 
-<b>📌 Tính năng 2 – Auto Hitter (Stripe)</b>
-• <code>/co &lt;url_stripe_checkout&gt;</code> – Parse checkout.
-• <code>/co &lt;url&gt; cc|mm|yy|cvv</code> – Charge 1 thẻ.
-• <code>/co &lt;url&gt; bin &lt;BIN&gt; [số_lượng]</code> – Gen thẻ từ BIN và hit (mặc định 1 thẻ).
+<b>2. Auto Hitter (Stripe)</b>
+• <code>/co &lt;url&gt;</code> – Parse checkout
+• <code>/co &lt;url&gt; cc|mm|yy|cvv</code> – Charge 1 thẻ
+• <code>/co &lt;url&gt; bin &lt;BIN&gt; [n]</code> – Gen thẻ từ BIN & hit (tối đa 50)
 
-<b>Ví dụ</b>
-<code>/co https://checkout.stripe.com/... 521853 5</code> – hit 5 thẻ gen từ BIN 521853."""
+<b>3. Proxy</b>
+• <code>/addproxy host:port:user:pass</code> – Thêm proxy (tự check alive)
+• <code>/removeproxy all</code> – Xóa hết proxy
+• <code>/proxy</code> – Xem proxy | <code>/proxy check</code> – Check alive
+
+<b>Tính năng nâng cao:</b>
+• Proxy auto-rotate khi hit
+• Random billing address / user-agent / timezone (bypass anti-fraud)
+• Luhn card gen từ BIN (như UsagiAutoX / TPropaganda)
+• Retry tự động khi disconnect/timeout"""
 
 @router.message(Command("start"))
 async def cmd_start(msg: Message):
