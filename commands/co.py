@@ -44,7 +44,10 @@ def _status_line(r: dict) -> str:
         return "Stopped ❌"
     return "Dead ❌"
 
-def _format_co_report(checkout: dict, results: list, total_time: float, price_str: str) -> str:
+def _build_live_report(
+    checkout: dict, results: list, total_cards: int,
+    price_str: str, finished: bool = False,
+) -> str:
     site_name = checkout.get("merchant") or "N/A"
     site_url = checkout.get("url") or ""
     site_line = f"{site_name} ({site_url})" if site_url else site_name
@@ -53,7 +56,7 @@ def _format_co_report(checkout: dict, results: list, total_time: float, price_st
         "—  —  —  —  —",
         f"Sɪᴛᴇ: {site_line}",
         f"Aᴍᴏᴜɴᴛ: {price_str}",
-        f"Cᴀʀᴅs: {len(results)}",
+        f"Cᴀʀᴅs: {len(results)}/{total_cards}",
         "━━━━━━━━━━━━━━━━━━━━━━━━━━",
     ]
     for i, r in enumerate(results, 1):
@@ -63,7 +66,10 @@ def _format_co_report(checkout: dict, results: list, total_time: float, price_st
         lines.append(f"Message: {r.get('response') or 'N/A'}")
         lines.append(f"Tɪᴍᴇ: {r.get('time', 0)}s")
         lines.append("━━━━━━━━━━━━━━━━━━━━━━━━━━")
-    lines.append("Aʟʟ ᴄᴀʀᴅs ᴘʀᴏᴄᴇssᴇᴅ sᴜᴄᴄᴇssғᴜʟʟʏ")
+    if not finished:
+        lines.append(f"⏳ Đang check card #{len(results) + 1}...")
+    else:
+        lines.append("Aʟʟ ᴄᴀʀᴅs ᴘʀᴏᴄᴇssᴇᴅ sᴜᴄᴄᴇssғᴜʟʟʏ")
     lines.append("Bʏ: @idkbroo_fr")
     return "\n".join(lines)
 
@@ -167,32 +173,46 @@ async def cmd_co(msg: Message):
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
         f"🔄 Hitting {price_str} — {len(cards)} cards ({mode_str})\n"
         f"🔌 {proxy_label}\n"
+        f"⏳ Đang check card #1...\n"
         f"━━━━━━━━━━━━━━━━━━━━━━━━━━"
     )
 
     start = time.perf_counter()
     results = []
     charged_one = None
+    last_text = ""
 
     for i, card in enumerate(cards):
         r = await charge_card(card, checkout, proxy_url=proxy_url)
         results.append(r)
-        if r["status"] == "CHARGED":
-            charged_one = r
-            break
-        if len(cards) > 3 and (i + 1) % 5 == 0:
-            charged_n = sum(1 for x in results if x["status"] == "CHARGED")
-            declined_n = sum(1 for x in results if x["status"] == "DECLINED")
+
+        is_last = (i == len(cards) - 1) or r["status"] == "CHARGED"
+        live_text = _build_live_report(
+            checkout, results, len(cards), price_str, finished=is_last,
+        )
+        if live_text != last_text:
             try:
-                await status_msg.edit_text(
-                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
-                    f"🔄 {i+1}/{len(cards)} — {price_str}\n"
-                    f"✅ {charged_n}  ❌ {declined_n}\n"
-                    f"🔌 {proxy_label}\n"
-                    f"━━━━━━━━━━━━━━━━━━━━━━━━━━"
-                )
+                await status_msg.edit_text(live_text)
+                last_text = live_text
             except Exception:
                 pass
+
+        if r["status"] == "CHARGED":
+            charged_one = r
+            await msg.answer(
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"  🟢 <b>CHARGED SUCCESSFULLY</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                f"💳 <code>{r['card']}</code>\n"
+                f"💰 {price_str}\n"
+                f"🏪 {checkout.get('merchant') or 'N/A'}\n"
+                f"⏱ {r['time']}s\n\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"  <b>by @idkbroo_fr</b>\n"
+                f"━━━━━━━━━━━━━━━━━━━━━━━━━━",
+                parse_mode=ParseMode.HTML,
+            )
+            break
 
     total_time = round(time.perf_counter() - start, 2)
     charged_n = sum(1 for x in results if x["status"] == "CHARGED")
@@ -200,13 +220,15 @@ async def cmd_co(msg: Message):
     three_ds = sum(1 for x in results if x["status"] == "3DS")
     errors = sum(1 for x in results if x["status"] in ("ERROR", "FAILED"))
 
-    out = _format_co_report(checkout, results, total_time, price_str)
-    if charged_one:
-        out = f"🟢 <b>CHARGED</b> {price_str}\n\n" + out
+    final = _build_live_report(checkout, results, len(cards), price_str, finished=True)
     summary = f"\n\n📊 ✅ {charged_n}  ❌ {declined_n}  🔐 {three_ds}"
     if errors:
         summary += f"  ⚠️ {errors}"
     summary += f"\n⏱ {total_time}s  🔌 {proxy_label}"
-    out += summary
+    final += summary
 
-    await status_msg.edit_text(out, parse_mode=ParseMode.HTML)
+    if final != last_text:
+        try:
+            await status_msg.edit_text(final, parse_mode=ParseMode.HTML)
+        except Exception:
+            pass
