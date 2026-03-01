@@ -46,7 +46,8 @@ BIN có thể có chữ `x` (random), ví dụ: `521853xx`, `424242xxxxxxxx`.
 3. Root của repo/upload phải chứa: `main.py`, `requirements.txt`, `config.py`, thư mục `commands/`, `hitter/`, file `cc_filter.py`, `card_utils.py`, `bin_gen.py`.
 4. Trong Railway project, vào **Variables** và thêm:
    - `BOT_TOKEN` = token bot từ BotFather.
-   - (Tùy chọn) `OWNER_ID`, `ALLOWED_GROUP_ID` nếu bạn muốn giới hạn quyền (trong code có thể dùng để check).
+   - `PROOF_CHANNEL` = channel gửi proof khi CHARGED (mặc định `@private_hiiter`). Bot phải là admin của channel.
+   - (Tùy chọn) `OWNER_ID`, `ALLOWED_GROUP_ID` nếu bạn muốn giới hạn quyền.
 5. **Process**: Railway sẽ đọc `Procfile`. Trong đó khai báo:
    ```text
    worker: python main.py

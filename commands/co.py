@@ -16,11 +16,32 @@ from bin_gen import generate_cards_from_bin
 from hitter.checkout_parse import extract_checkout_url, get_checkout_info
 from hitter.stripe_charge import charge_card
 from proxy_manager import get_random_proxy_url
+from config import PROOF_CHANNEL
 
 router = Router()
 
 def _sym(c: str) -> str:
     return {"USD": "$", "EUR": "€", "GBP": "£", "INR": "₹", "JPY": "¥"}.get(c, "")
+
+def _mask_cc(card_str: str) -> str:
+    parts = card_str.split("|")
+    if not parts:
+        return "XXXX"
+    cc = parts[0]
+    if len(cc) >= 8:
+        masked = cc[:6] + "X" * (len(cc) - 10) + cc[-4:] if len(cc) > 10 else cc[:4] + "XXXX" + cc[-4:]
+    else:
+        masked = "XXXX"
+    parts[0] = masked
+    return "|".join(parts)
+
+def _user_tag(user) -> str:
+    if user.username:
+        return f"@{user.username}"
+    name = user.first_name or ""
+    if user.last_name:
+        name += f" {user.last_name}"
+    return f'<a href="tg://user?id={user.id}">{name}</a>'
 
 def _status_line(r: dict) -> str:
     """Format status like UsagiAutoCO: Live ✅ (code) or Dead (code) ❌ or Stopped ❌"""
@@ -199,6 +220,8 @@ async def cmd_co(msg: Message):
 
         if r["status"] == "CHARGED":
             charged_one = r
+            user_tag = _user_tag(msg.from_user)
+
             await msg.answer(
                 f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                 f"  🟢 <b>CHARGED SUCCESSFULLY</b>\n"
@@ -206,12 +229,34 @@ async def cmd_co(msg: Message):
                 f"💳 <code>{r['card']}</code>\n"
                 f"💰 {price_str}\n"
                 f"🏪 {checkout.get('merchant') or 'N/A'}\n"
-                f"⏱ {r['time']}s\n\n"
+                f"⏱ {r['time']}s\n"
+                f"👤 Process by: {user_tag}\n\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
                 f"  <b>by @idkbroo_fr</b>\n"
                 f"━━━━━━━━━━━━━━━━━━━━━━━━━━",
                 parse_mode=ParseMode.HTML,
             )
+
+            if PROOF_CHANNEL:
+                try:
+                    await msg.bot.send_message(
+                        PROOF_CHANNEL,
+                        f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"  🟢 <b>CHARGED SUCCESSFULLY</b>\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                        f"💳 <code>{_mask_cc(r['card'])}</code>\n"
+                        f"💰 {price_str}\n"
+                        f"🏪 {checkout.get('merchant') or 'N/A'}\n"
+                        f"⏱ {r['time']}s\n"
+                        f"👤 Process by: {user_tag}\n\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                        f"  <b>by @idkbroo_fr</b>\n"
+                        f"━━━━━━━━━━━━━━━━━━━━━━━━━━",
+                        parse_mode=ParseMode.HTML,
+                    )
+                except Exception:
+                    pass
+
             break
 
     total_time = round(time.perf_counter() - start, 2)
