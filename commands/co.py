@@ -79,8 +79,7 @@ def _build_live_report(
     price_str: str, finished: bool = False,
 ) -> str:
     site_name = checkout.get("merchant") or "N/A"
-    site_url = checkout.get("url") or ""
-    site_line = f"{site_name} ({site_url})" if site_url else site_name
+    site_line = site_name
     lines = [
         "TPTTH PRIVATE HITTER",
         "—  —  —  —  —",
