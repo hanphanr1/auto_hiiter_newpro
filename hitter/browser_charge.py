@@ -260,6 +260,87 @@ def _parse_status_from_page(url: str, text: str) -> tuple[str, str] | None:
     return None
 
 
+async def _dismiss_stripe_link(page, max_attempts: int = 5):
+    """Dismiss Stripe Link verification popup by clicking 'Pay without Link'
+    or closing the Link modal. Stripe Link intercepts checkout and asks for
+    email verification codes which we can't handle."""
+    for _ in range(max_attempts):
+        dismissed = False
+
+        link_dismiss_selectors = [
+            'a:has-text("Pay without Link")',
+            'button:has-text("Pay without Link")',
+            '[data-testid="pay-without-link"]',
+            'a[href="#"]:has-text("without")',
+            'text="Pay without Link"',
+        ]
+        for sel in link_dismiss_selectors:
+            try:
+                el = await page.query_selector(sel)
+                if el and await el.is_visible():
+                    await el.click()
+                    dismissed = True
+                    await asyncio.sleep(1.5)
+                    break
+            except Exception:
+                continue
+
+        if dismissed:
+            continue
+
+        close_selectors = [
+            '[aria-label="Close"]',
+            'button.close', 'button.modal-close',
+            '.LinkModal-close', '[data-testid="link-close"]',
+            'button:has-text("×")', 'button:has-text("✕")',
+            '[class*="close" i]',
+        ]
+        for sel in close_selectors:
+            try:
+                el = await page.query_selector(sel)
+                if el and await el.is_visible():
+                    await el.click()
+                    dismissed = True
+                    await asyncio.sleep(1)
+                    break
+            except Exception:
+                continue
+
+        if dismissed:
+            continue
+
+        try:
+            link_iframe = None
+            for frame in page.frames:
+                furl = (frame.url or "").lower()
+                if "link" in furl or "verify" in furl or "confirm" in furl:
+                    link_iframe = frame
+                    break
+            if link_iframe:
+                for sel in ['a:has-text("Pay without")', 'button:has-text("Pay without")']:
+                    try:
+                        el = await link_iframe.query_selector(sel)
+                        if el:
+                            await el.click()
+                            dismissed = True
+                            await asyncio.sleep(1.5)
+                            break
+                    except Exception:
+                        continue
+        except Exception:
+            pass
+
+        if not dismissed:
+            try:
+                await page.keyboard.press("Escape")
+                await asyncio.sleep(0.5)
+            except Exception:
+                pass
+            break
+
+    await asyncio.sleep(0.5)
+
+
 async def browser_charge_card(
     card: dict, checkout_url: str,
     proxy_url: str | None = None,
@@ -319,8 +400,17 @@ async def browser_charge_card(
 
         page.on("response", handle_response)
 
-        await page.goto(checkout_url, wait_until="networkidle", timeout=timeout_ms)
-        await asyncio.sleep(random.uniform(0.8, 1.5))
+        await page.goto(checkout_url, wait_until="domcontentloaded", timeout=timeout_ms)
+
+        try:
+            await page.wait_for_load_state("networkidle", timeout=10000)
+        except Exception:
+            pass
+        await asyncio.sleep(1.5)
+
+        # --- Dismiss Stripe Link popup / "Pay without Link" ---
+        await _dismiss_stripe_link(page)
+        await asyncio.sleep(0.5)
 
         # --- Fill card number ---
         card_filled = False
