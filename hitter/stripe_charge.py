@@ -61,6 +61,9 @@ def _is_surface_error(data: dict) -> bool:
     return (
         "integration surface" in msg
         or "unsupported for publishable key" in msg
+        or "cannot perform this action" in msg
+        or "created by checkout" in msg
+        or "not allowed for checkout session" in msg
         or code == "resource_missing"
     )
 

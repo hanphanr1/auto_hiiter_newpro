@@ -80,7 +80,7 @@ def _status_line(r: dict) -> str:
             return f"Live ✅ ({code or 'incorrect_cvc'})"
         if "insufficient_funds" in msg:
             return "Live ✅ (insufficient_funds)"
-        if "integration surface" in msg or "unsupported" in msg:
+        if "integration surface" in msg or "unsupported" in msg or "cannot perform" in msg or "created by checkout" in msg:
             return "Dead (unsupported_integration) ❌"
         if code in DEAD_CODES:
             return f"Dead ({code}) ❌"
