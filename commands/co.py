@@ -44,25 +44,34 @@ def _user_tag(user) -> str:
     return f'<a href="tg://user?id={user.id}">{name}</a>'
 
 def _status_line(r: dict) -> str:
-    """Format status like UsagiAutoCO: Live ✅ (code) or Dead (code) ❌ or Stopped ❌"""
     st = (r.get("status") or "").upper()
     msg = (r.get("response") or "").strip().lower()
+    resp_raw = (r.get("response") or "").strip()
+
     if st == "CHARGED":
         return "Live ✅ (charged)"
+
     if st == "DECLINED":
+        if "incorrect_cvc" in msg or "security code is incorrect" in msg:
+            return "Live ✅ (incorrect_cvc)"
+        if "insufficient_funds" in msg:
+            return "Live ✅ (insufficient_funds)"
         if "integration surface" in msg or "unsupported for publishable key" in msg:
             return "Dead (unsupported_integration) ❌"
         code = ""
-        resp = (r.get("response") or "").strip()
-        if resp and ":" in resp:
-            code = resp.split(":", 1)[0].strip().lower().replace(" ", "_")[:30]
+        if resp_raw and ":" in resp_raw:
+            code = resp_raw.split(":", 1)[0].strip().lower().replace(" ", "_")[:30]
         return f"Dead ({code}) ❌" if code else "Dead ❌"
+
     if st == "3DS":
-        return "Dead ❌"
+        return "Live ✅ (3DS)"
+
     if st in ("ERROR", "FAILED"):
         return "Dead ❌"
+
     if "no longer active" in msg or ("session" in msg and "active" in msg):
         return "Stopped ❌"
+
     return "Dead ❌"
 
 def _build_live_report(
