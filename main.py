@@ -2,6 +2,7 @@
 import asyncio
 import os
 from aiogram import Bot, Dispatcher
+from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
 from config import BOT_TOKEN
@@ -10,7 +11,7 @@ from commands import router
 if not BOT_TOKEN:
     raise SystemExit("Set BOT_TOKEN in environment.")
 
-bot = Bot(token=BOT_TOKEN, default=ParseMode.HTML)
+bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
 dp.include_router(router)
 
