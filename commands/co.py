@@ -239,7 +239,7 @@ async def cmd_co(msg: Message):
         r = await charge_card(card, checkout, proxy_url=proxy_url)
         results.append(r)
 
-        is_last = (i == len(cards) - 1) or r["status"] == "CHARGED"
+        is_last = (i == len(cards) - 1) or r["status"] == "CHARGED" or (r["status"] == "3DS" and "cached" in (r.get("response") or ""))
         live_text = _build_live_report(
             checkout, results, len(cards), price_str, finished=is_last,
         )
@@ -249,6 +249,9 @@ async def cmd_co(msg: Message):
                 last_text = live_text
             except Exception:
                 pass
+
+        if r["status"] == "3DS" and "cached" in (r.get("response") or ""):
+            break
 
         if r["status"] == "CHARGED":
             charged_one = r

