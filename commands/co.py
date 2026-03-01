@@ -251,6 +251,23 @@ async def cmd_co(msg: Message):
                 pass
 
         if r["status"] == "3DS" and "cached" in (r.get("response") or ""):
+            try:
+                await msg.answer(
+                    "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    "  🔐 <b>STOP — Site yêu cầu 3DS</b>\n"
+                    "━━━━━━━━━━━━━━━━━━━━━━━━━━\n\n"
+                    "⚠️ Site này bắt <b>3D Secure (OTP)</b> từ bây giờ.\n"
+                    "Bot không thể tự nhập mã OTP ngân hàng.\n\n"
+                    f"🔹 Đã thử: {len(results)} card — tất cả 3DS\n"
+                    f"🔹 Còn lại: {len(cards) - len(results)} card — <b>bỏ qua</b>\n\n"
+                    "💡 <i>Thử site khác không bật 3DS hoặc dùng BIN xịn hơn hoặc gửi lại link nhé.</i>\n\n"
+                    "━━━━━━━━━━━━━━━━━━━━━━━━━━\n"
+                    "  <b>by @idkbroo_fr</b>\n"
+                    "━━━━━━━━━━━━━━━━━━━━━━━━━━",
+                    parse_mode=ParseMode.HTML,
+                )
+            except Exception:
+                pass
             break
 
         if r["status"] == "CHARGED":
