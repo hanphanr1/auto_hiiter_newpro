@@ -109,15 +109,36 @@ def random_timezone() -> str:
 def random_locale() -> str:
     return random.choice(LOCALES)
 
-def build_stripe_headers(ua: str | None = None) -> dict:
-    """Build realistic Stripe API headers like extensions do."""
+import json as _json
+
+def _stripe_client_ua(ua: str) -> str:
+    return _json.dumps({
+        "os": {"name": "Windows", "version": "10"},
+        "browser": {"name": "Chrome", "version": "120.0.0.0"},
+        "device": {"name": "Desktop"},
+        "bindings_version": "stripe.js/v3",
+        "lang": "js",
+        "lang_version": "",
+        "platform": "browser",
+        "analytics_method": "stripe-js/v3",
+        "user_agent": ua,
+    }, separators=(",", ":"))
+
+
+def build_stripe_headers(ua: str | None = None, origin: str = "https://checkout.stripe.com") -> dict:
+    agent = ua or random_user_agent()
     return {
         "authority": "api.stripe.com",
         "accept": "application/json",
         "accept-language": "en-US,en;q=0.9",
         "cache-control": "no-cache",
         "content-type": "application/x-www-form-urlencoded",
-        "origin": "https://checkout.stripe.com",
-        "referer": "https://checkout.stripe.com/",
-        "user-agent": ua or random_user_agent(),
+        "origin": origin,
+        "referer": f"{origin}/",
+        "user-agent": agent,
+        "stripe-client-user-agent": _stripe_client_ua(agent),
     }
+
+
+def build_stripe_headers_js(ua: str | None = None) -> dict:
+    return build_stripe_headers(ua, origin="https://js.stripe.com")

