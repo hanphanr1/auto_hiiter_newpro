@@ -19,7 +19,9 @@ async def main():
         await dp.start_polling(bot, skip_updates=True)
     finally:
         from hitter.stripe_charge import close_session
+        from hitter.browser_charge import close_browser
         await close_session()
+        await close_browser()
 
 if __name__ == "__main__":
     asyncio.run(main())

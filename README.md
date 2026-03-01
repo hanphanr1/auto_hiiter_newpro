@@ -91,6 +91,8 @@ sourcebot/
 
 ## Lưu ý
 
-- Bot dùng **long polling** (không cần public URL). Trên Railway chọn process **worker** chạy `python main.py`.
+- Bot dùng **long polling** (không cần public URL). Trên Railway chọn process **worker**.
 - Không hardcode token: luôn dùng biến môi trường `BOT_TOKEN`.
-- Hitter gọi trực tiếp API Stripe; có thể cần proxy tùy môi trường (trong code có thể mở rộng thêm proxy sau).
+- Bot có **Dockerfile** cài sẵn Chromium + Playwright cho browser-based hitter.
+- Khi site Stripe có PK restricted, bot tự dùng headless browser (chậm hơn ~10-15s/card nhưng bypass được).
+- Railway tự detect Dockerfile và build Docker image.

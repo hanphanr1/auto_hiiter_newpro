@@ -43,6 +43,22 @@ def _user_tag(user) -> str:
         name += f" {user.last_name}"
     return f'<a href="tg://user?id={user.id}">{name}</a>'
 
+LIVE_CODES = frozenset({
+    "incorrect_cvc", "incorrect_zip", "insufficient_funds",
+    "authentication_required", "card_velocity_exceeded",
+})
+
+DEAD_CODES = frozenset({
+    "stolen_card", "lost_card", "fraudulent", "pickup_card",
+    "restricted_card", "security_violation", "card_not_supported",
+    "invalid_account", "do_not_honor", "do_not_try_again",
+    "invalid_amount", "currency_not_supported", "testmode_decline",
+    "expired_card", "processing_error", "new_account_information_available",
+    "disputed", "invalid_customer_account", "limit_exceeded",
+    "partner_invalid", "partner_high_risk",
+})
+
+
 def _status_line(r: dict) -> str:
     st = (r.get("status") or "").upper()
     msg = (r.get("response") or "").strip().lower()
@@ -51,16 +67,24 @@ def _status_line(r: dict) -> str:
     if st == "CHARGED":
         return "Live ✅ (charged)"
 
+    if st == "CCN":
+        code = resp_raw.split(":", 1)[0].strip().lower() if ":" in resp_raw else "ccn"
+        return f"Live ✅ ({code})"
+
     if st == "DECLINED":
-        if "incorrect_cvc" in msg or "security code is incorrect" in msg:
-            return "Live ✅ (incorrect_cvc)"
-        if "insufficient_funds" in msg:
-            return "Live ✅ (insufficient_funds)"
-        if "integration surface" in msg or "unsupported for publishable key" in msg:
-            return "Dead (unsupported_integration) ❌"
         code = ""
         if resp_raw and ":" in resp_raw:
             code = resp_raw.split(":", 1)[0].strip().lower().replace(" ", "_")[:30]
+
+        if code in LIVE_CODES or "incorrect_cvc" in msg or "security code" in msg:
+            return f"Live ✅ ({code or 'incorrect_cvc'})"
+        if "insufficient_funds" in msg:
+            return "Live ✅ (insufficient_funds)"
+        if "integration surface" in msg or "unsupported" in msg:
+            return "Dead (unsupported_integration) ❌"
+        if code in DEAD_CODES:
+            return f"Dead ({code}) ❌"
+
         return f"Dead ({code}) ❌" if code else "Dead ❌"
 
     if st == "3DS":
@@ -269,12 +293,16 @@ async def cmd_co(msg: Message):
 
     total_time = round(time.perf_counter() - start, 2)
     charged_n = sum(1 for x in results if x["status"] == "CHARGED")
+    ccn_n = sum(1 for x in results if x["status"] == "CCN")
     declined_n = sum(1 for x in results if x["status"] == "DECLINED")
     three_ds = sum(1 for x in results if x["status"] == "3DS")
     errors = sum(1 for x in results if x["status"] in ("ERROR", "FAILED"))
 
     final = _build_live_report(checkout, results, len(cards), price_str, finished=True)
-    summary = f"\n\n📊 ✅ {charged_n}  ❌ {declined_n}  🔐 {three_ds}"
+    summary = f"\n\n📊 ✅ {charged_n}"
+    if ccn_n:
+        summary += f"  🟡 CCN:{ccn_n}"
+    summary += f"  ❌ {declined_n}  🔐 {three_ds}"
     if errors:
         summary += f"  ⚠️ {errors}"
     summary += f"\n⏱ {total_time}s  🔌 {proxy_label}"
