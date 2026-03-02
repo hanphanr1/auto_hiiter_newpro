@@ -103,6 +103,8 @@ def _status_line(r: dict) -> str:
         return f"❌ Dead ({code})" if code else "❌ Dead"
     if st == "3DS":
         return "🔐 3DS Required"
+    if st == "SESSION_DEAD":
+        return "⛔ Session Dead"
     if st in ("ERROR", "FAILED"):
         return "❌ Error"
     if "no longer active" in msg or ("session" in msg and "active" in msg):
@@ -245,6 +247,7 @@ async def cmd_co(msg: Message):
         is_last = (
             (i == len(cards) - 1)
             or r["status"] == "CHARGED"
+            or r["status"] == "SESSION_DEAD"
             or (r["status"] == "3DS" and "cached" in (r.get("response") or ""))
         )
         live_text = _build_live_report(
@@ -260,6 +263,22 @@ async def cmd_co(msg: Message):
                 last_text = live_text
             except Exception:
                 pass
+
+        if r["status"] == "SESSION_DEAD":
+            remaining = len(cards) - len(results)
+            try:
+                await msg.answer(
+                    f"{SEP}\n"
+                    f"  ⛔ <b>{t(uid, 'co_session_dead_title')}</b>\n"
+                    f"{SEP}\n\n"
+                    f"{t(uid, 'co_session_dead_body', tried=len(results), remaining=remaining)}\n\n"
+                    f"{_FOOTER}",
+                    parse_mode=ParseMode.HTML,
+                    disable_web_page_preview=True,
+                )
+            except Exception:
+                pass
+            break
 
         if r["status"] == "3DS" and "cached" in (r.get("response") or ""):
             try:

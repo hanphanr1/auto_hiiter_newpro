@@ -88,6 +88,14 @@ _TEXTS = {
             "🔹 Remaining: {remaining} cards — <b>skipped</b>\n\n"
             "💡 <i>Try another site without 3DS, use better BINs, or re-send the link.</i>"
         ),
+        "co_session_dead_title": "STOP — Checkout Session Dead",
+        "co_session_dead_body": (
+            "⚠️ The checkout session has been <b>canceled/expired</b>.\n"
+            "No more cards can be processed on this link.\n\n"
+            "🔹 Tried: {tried} cards\n"
+            "🔹 Remaining: {remaining} cards — <b>skipped</b>\n\n"
+            "💡 <i>Please generate a new checkout link and try again.</i>"
+        ),
         "filter_error": "❌ Cannot read file: {error}",
         "filter_no_cc": "❌ No CC found in file.",
         "filter_result": "✅ Filtered <b>{count}</b> CC from <code>{file}</code>",
@@ -167,6 +175,14 @@ _TEXTS = {
             "🔹 Đã thử: {tried} thẻ — tất cả 3DS\n"
             "🔹 Còn lại: {remaining} thẻ — <b>bỏ qua</b>\n\n"
             "💡 <i>Thử site khác không bật 3DS hoặc dùng BIN xịn hơn hoặc gửi lại link nhé.</i>"
+        ),
+        "co_session_dead_title": "DỪNG — Checkout Session Đã Chết",
+        "co_session_dead_body": (
+            "⚠️ Checkout session đã bị <b>hủy/hết hạn</b>.\n"
+            "Không thể xử lý thêm thẻ nào trên link này.\n\n"
+            "🔹 Đã thử: {tried} thẻ\n"
+            "🔹 Còn lại: {remaining} thẻ — <b>bỏ qua</b>\n\n"
+            "💡 <i>Vui lòng tạo link checkout mới và thử lại.</i>"
         ),
         "filter_error": "❌ Không đọc được file: {error}",
         "filter_no_cc": "❌ Không tìm thấy CC nào trong file.",

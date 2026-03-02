@@ -47,6 +47,13 @@ AMOUNT_MISMATCH_KEYWORDS = frozenset({
     "computed invoice amount", "does not match",
 })
 
+SESSION_DEAD_KEYWORDS = frozenset({
+    "checkout_not_active_session", "not_active_session",
+    "no longer active", "session is no longer",
+    "payment_intent_unexpected_state",
+    "session_expired", "checkout session has expired",
+})
+
 
 async def get_session():
     global _session
@@ -89,6 +96,16 @@ def _is_amount_mismatch(data: dict) -> bool:
     code = (data["error"].get("code") or "").lower()
     combined = f"{code} {msg}"
     return any(kw in combined for kw in AMOUNT_MISMATCH_KEYWORDS)
+
+
+def _is_session_dead(data: dict) -> bool:
+    """Detect dead/expired/canceled checkout session errors."""
+    if "error" not in data:
+        return False
+    msg = (data["error"].get("message") or "").lower()
+    code = (data["error"].get("code") or "").lower()
+    combined = f"{code} {msg}"
+    return any(kw in combined for kw in SESSION_DEAD_KEYWORDS)
 
 
 def _extract_pi_info(init_data: dict) -> tuple[str, str]:
@@ -144,6 +161,11 @@ def _parse_confirm_response(conf: dict) -> tuple[str, str] | None:
 
     if _is_amount_mismatch(conf):
         return None
+
+    if _is_session_dead(conf):
+        msg = conf["error"].get("message", "Session dead")
+        code = conf["error"].get("code", "")
+        return "SESSION_DEAD", f"{code}: {msg}" if code else msg
 
     if "error" in conf:
         err = conf["error"]
