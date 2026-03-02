@@ -174,7 +174,10 @@ def _parse_stripe_response(data: dict) -> dict | None:
         code = err.get("code", "")
         msg = err.get("message", "Failed")
 
-        if "integration surface" in msg.lower() or "unsupported" in msg.lower():
+        msg_lower = msg.lower()
+        if "integration surface" in msg_lower or "unsupported" in msg_lower:
+            return None
+        if "amount_mismatch" in msg_lower or "amount_mismatch" in code.lower():
             return None
 
         if dc in DECLINE_CODES_LIVE:
@@ -202,6 +205,18 @@ def _parse_stripe_response(data: dict) -> dict | None:
         return result
 
     if st == "requires_action":
+        na = pi.get("next_action") or {}
+        na_type = na.get("type", "")
+
+        if na_type == "redirect_to_url":
+            redirect_url = (na.get("redirect_to_url", {}).get("url", "") or "").lower()
+            if any(kw in redirect_url for kw in (
+                "captcha", "recaptcha", "hcaptcha", "turnstile",
+            )):
+                result["status"] = "DECLINED"
+                result["response"] = "Captcha/Verification required"
+                return result
+
         result["status"] = "3DS"
         result["response"] = "3DS Required"
         return result

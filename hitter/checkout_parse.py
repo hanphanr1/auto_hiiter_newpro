@@ -140,3 +140,27 @@ async def get_checkout_info(url: str, proxy_url: str | None = None) -> dict:
     except Exception as e:
         result["error"] = str(e)
     return result
+
+
+async def re_init_checkout(pk: str, cs: str, proxy_url: str | None = None) -> dict | None:
+    """Re-fetch init data to get the latest invoice amounts.
+    Used when a checkout_amount_mismatch error is encountered."""
+    try:
+        ua = random_user_agent()
+        headers = build_stripe_headers(ua)
+        locale = random_locale()
+        tz = random_timezone()
+        body = f"key={pk}&eid=NA&browser_locale={locale}&browser_timezone={tz}&redirect_type=url"
+        connector = aiohttp.TCPConnector(ssl=False)
+        async with aiohttp.ClientSession(connector=connector) as session:
+            async with session.post(
+                f"https://api.stripe.com/v1/payment_pages/{cs}/init",
+                headers=headers, data=body, proxy=proxy_url,
+                timeout=aiohttp.ClientTimeout(total=15),
+            ) as r:
+                data = await r.json()
+        if "error" not in data:
+            return data
+    except Exception:
+        pass
+    return None

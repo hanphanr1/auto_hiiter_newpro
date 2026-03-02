@@ -1,41 +1,68 @@
 # -*- coding: utf-8 -*-
-from aiogram import Router
-from aiogram.types import Message
+from aiogram import Router, F
+from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKeyboardButton
 from aiogram.filters import Command
 from aiogram.enums import ParseMode
 
+from i18n import set_lang, get_lang, t
+
 router = Router()
 
-HELP_TEXT = """━━━━━━━━━━━━━━━━━━━━━━━━━━
-  <b>TPTTH PRIVATE HITTER</b>
-  <i>CC Filter & Auto Hitter</i>
-━━━━━━━━━━━━━━━━━━━━━━━━━━
+_LANG_KB = InlineKeyboardMarkup(inline_keyboard=[
+    [
+        InlineKeyboardButton(text="🇬🇧 English", callback_data="set_lang:en"),
+        InlineKeyboardButton(text="🇻🇳 Tiếng Việt", callback_data="set_lang:vi"),
+    ]
+])
 
-🔹 <b>CC FILTER</b>
-├ Gửi <b>file .txt</b> → Lọc ra <code>cc|mm|yy|cvv</code>, trả file
-├ Gửi <b>text</b> có CC → Reply các dòng CC
-└ Tự nhận diện mọi format
-
-🔹 <b>AUTO HITTER</b>
-├ <code>/co &lt;url&gt;</code> — Parse checkout info
-├ <code>/co &lt;url&gt; cc|mm|yy|cvv</code> — Hit 1 thẻ
-├ <code>/co &lt;url&gt; bin &lt;BIN&gt; [n]</code> — Gen & hit (max 50)
-└ Auto retry, random billing, anti-fraud bypass
-
-🔹 <b>PROXY</b>
-├ <code>/addproxy host:port:user:pass</code> — Add (auto check)
-├ <code>/removeproxy all</code> — Remove all
-├ <code>/proxy</code> — List | <code>/proxy check</code> — Check alive
-└ Auto-rotate khi hit
-
-━━━━━━━━━━━━━━━━━━━━━━━━━━
-  <b>by @idkbroo_fr</b>
-━━━━━━━━━━━━━━━━━━━━━━━━━━"""
 
 @router.message(Command("start"))
 async def cmd_start(msg: Message):
-    await msg.answer(HELP_TEXT, parse_mode=ParseMode.HTML)
+    await msg.answer(
+        "🌟 <b>Welcome / Chào mừng!</b> 🌟\n\n"
+        "📱 Please select your language / Vui lòng chọn ngôn ngữ:",
+        reply_markup=_LANG_KB,
+        parse_mode=ParseMode.HTML,
+    )
+
+
+@router.callback_query(F.data.startswith("set_lang:"))
+async def cb_set_lang(cb: CallbackQuery):
+    lang = cb.data.split(":")[1]
+    uid = cb.from_user.id
+    set_lang(uid, lang)
+    await cb.answer(t(uid, "lang_set"))
+    await cb.message.edit_text(
+        t(uid, "help"),
+        parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True,
+    )
+
 
 @router.message(Command("help"))
 async def cmd_help(msg: Message):
-    await msg.answer(HELP_TEXT, parse_mode=ParseMode.HTML)
+    uid = msg.from_user.id
+    lang = get_lang(uid)
+    if not lang:
+        await msg.answer(
+            "🌟 <b>Welcome / Chào mừng!</b> 🌟\n\n"
+            "📱 Please select your language / Vui lòng chọn ngôn ngữ:",
+            reply_markup=_LANG_KB,
+            parse_mode=ParseMode.HTML,
+        )
+        return
+    await msg.answer(
+        t(uid, "help"),
+        parse_mode=ParseMode.HTML,
+        disable_web_page_preview=True,
+    )
+
+
+@router.message(Command("lang"))
+async def cmd_lang(msg: Message):
+    await msg.answer(
+        "🌟 <b>Change Language / Đổi ngôn ngữ</b> 🌟\n\n"
+        "📱 Please select / Vui lòng chọn:",
+        reply_markup=_LANG_KB,
+        parse_mode=ParseMode.HTML,
+    )
