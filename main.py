@@ -3,7 +3,6 @@ import asyncio
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-<<<<<<< HEAD
 from aiogram.types import Message
 from aiogram.dispatcher.middlewares.base import BaseMiddleware
 
@@ -11,11 +10,6 @@ from config import BOT_TOKEN, ADMIN_ID
 from commands import router
 from user_id import is_user_allowed
 from i18n import get_lang
-=======
-
-from config import BOT_TOKEN
-from commands import router
->>>>>>> d0bd947252bd06f8d084d5e3f35a29d058232d9e
 
 if not BOT_TOKEN:
     raise SystemExit("Set BOT_TOKEN in environment.")
@@ -24,7 +18,6 @@ bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTM
 dp = Dispatcher()
 dp.include_router(router)
 
-<<<<<<< HEAD
 
 class UserPermissionMiddleware(BaseMiddleware):
     """Middleware to check if user is allowed to use the bot."""
@@ -53,8 +46,6 @@ class UserPermissionMiddleware(BaseMiddleware):
 # Register middleware
 dp.message.middleware(UserPermissionMiddleware())
 
-=======
->>>>>>> d0bd947252bd06f8d084d5e3f35a29d058232d9e
 async def main():
     try:
         await dp.start_polling(bot, skip_updates=True)
