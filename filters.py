@@ -5,7 +5,13 @@ from aiogram.types import Message
 
 from config import ADMIN_ID
 from user_id import is_user_allowed
-from i18n import get_lang
+
+
+class IsAdmin(Filter):
+    """Filter to check if user is admin."""
+
+    async def __call__(self, message: Message) -> bool:
+        return message.from_user.id == ADMIN_ID
 
 
 class IsAllowedUser(Filter):
@@ -23,12 +29,4 @@ class IsAllowedUser(Filter):
             return True
 
         # Check if user is allowed
-        if not is_user_allowed(user_id):
-            lang = get_lang(user_id)
-            if lang == "vi":
-                await message.answer("Bạn không được cấp quyền hãy liên hệ với admin @idkbroo_fr")
-            else:
-                await message.answer("You don't have permission. Please contact the admin @idkbroo_fr.")
-            return False
-
-        return True
+        return is_user_allowed(user_id)
