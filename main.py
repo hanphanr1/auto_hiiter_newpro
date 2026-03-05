@@ -24,6 +24,11 @@ class UserPermissionMiddleware(BaseMiddleware):
 
     async def on_process_message(self, message: Message, data: dict):
         user_id = message.from_user.id
+
+        # Allow /start command to let user choose language first
+        if message.text and message.text.strip().startswith("/start"):
+            return
+
         # Allow admin to use all commands
         if user_id == ADMIN_ID:
             return
