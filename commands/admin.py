@@ -2,6 +2,7 @@
 from aiogram import Router, F
 from aiogram.types import Message
 from aiogram.filters import Command
+from aiogram.enums import ParseMode
 
 from config import ADMIN_ID
 from user_id import add_user, remove_user, get_allowed_users
@@ -14,27 +15,20 @@ router = Router()
 
 def is_admin(user_id: int) -> bool:
     """Check if user is admin."""
-    logger.info(f"Checking admin: {user_id} vs {ADMIN_ID}")
     return user_id == ADMIN_ID
-
-
-@router.message(Command("admin"))
-async def cmd_admin(msg: Message):
-    """Test admin command."""
-    await msg.answer(f"Admin ID: {ADMIN_ID}\nYour ID: {msg.from_user.id}\nIs admin: {is_admin(msg.from_user.id)}")
 
 
 @router.message(Command("adduser"))
 async def cmd_adduser(msg: Message):
     """Add a user to allowed list - admin only."""
     if not is_admin(msg.from_user.id):
-        await msg.answer("❌ Bạn không có quyền sử dụng lệnh này.")
+        await msg.answer("You don't have permission.")
         return
 
     # Parse user ID from command
     args = msg.text.split()
     if len(args) < 2:
-        await msg.answer("Usage: /adduser <user_id>")
+        await msg.answer("Usage: /adduser USER_ID")
         return
 
     try:
@@ -44,21 +38,21 @@ async def cmd_adduser(msg: Message):
         return
 
     if add_user(user_id_to_add):
-        await msg.answer(f"✅ User <code>{user_id_to_add}</code> đã được thêm vào danh sách.")
+        await msg.answer(f"User {user_id_to_add} added.")
     else:
-        await msg.answer(f"ℹ️ User <code>{user_id_to_add}</code> đã có trong danh sách.")
+        await msg.answer(f"User {user_id_to_add} already exists.")
 
 
 @router.message(Command("removeuser"))
 async def cmd_removeuser(msg: Message):
     """Remove a user from allowed list - admin only."""
     if not is_admin(msg.from_user.id):
-        await msg.answer("❌ Bạn không có quyền sử dụng lệnh này.")
+        await msg.answer("You don't have permission.")
         return
 
     args = msg.text.split()
     if len(args) < 2:
-        await msg.answer("Usage: /removeuser <user_id>")
+        await msg.answer("Usage: /removeuser USER_ID")
         return
 
     try:
@@ -68,22 +62,22 @@ async def cmd_removeuser(msg: Message):
         return
 
     if remove_user(user_id_to_remove):
-        await msg.answer(f"✅ User <code>{user_id_to_remove}</code> đã được xóa khỏi danh sách.")
+        await msg.answer(f"User {user_id_to_remove} removed.")
     else:
-        await msg.answer(f"ℹ️ User <code>{user_id_to_remove}</code> không có trong danh sách.")
+        await msg.answer(f"User {user_id_to_remove} not found.")
 
 
 @router.message(Command("listusers"))
 async def cmd_listusers(msg: Message):
     """List all allowed users - admin only."""
     if not is_admin(msg.from_user.id):
-        await msg.answer("❌ Bạn không có quyền sử dụng lệnh này.")
+        await msg.answer("You don't have permission.")
         return
 
     users = get_allowed_users()
     if not users:
-        await msg.answer("Chưa có user nào được thêm.")
+        await msg.answer("No users added yet.")
         return
 
-    user_list = "\n".join([f"• <code>{uid}</code>" for uid in sorted(users)])
-    await msg.answer(f"Danh sách user được phép sử dụng bot:\n\n{user_list}")
+    user_list = "\n".join([f"- {uid}" for uid in sorted(users)])
+    await msg.answer(f"Allowed users:\n\n{user_list}")

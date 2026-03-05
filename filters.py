@@ -7,18 +7,11 @@ from config import ADMIN_ID
 from user_id import is_user_allowed
 
 
-class IsAdmin(Filter):
-    """Filter to check if user is admin."""
+class IsAdminOrAllowed(Filter):
+    """Check if user is admin or allowed."""
 
     async def __call__(self, message: Message) -> bool:
-        return message.from_user.id == ADMIN_ID
-
-
-class IsAllowedUser(Filter):
-    """Filter to check if user is allowed to use the bot."""
-
-    async def __call__(self, message: Message) -> bool:
-        # Allow /start command
+        # Allow /start
         if message.text and message.text.strip().startswith("/start"):
             return True
 
@@ -28,5 +21,9 @@ class IsAllowedUser(Filter):
         if user_id == ADMIN_ID:
             return True
 
-        # Check if user is allowed
-        return is_user_allowed(user_id)
+        # Check allowed users
+        if not is_user_allowed(user_id):
+            await message.answer("You don't have permission. Contact admin @idkbroo_fr")
+            return False
+
+        return True

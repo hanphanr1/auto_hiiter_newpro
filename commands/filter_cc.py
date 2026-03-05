@@ -6,7 +6,7 @@ from aiogram.enums import ParseMode
 
 from cc_filter import extract_cc_lines
 from i18n import get_lang, t, BRAND, BY, SEP, PROOF_LINK
-from filters import IsAllowedUser
+from filters import IsAdminOrAllowed
 
 router = Router()
 
@@ -22,7 +22,7 @@ _FOOTER = (
 )
 
 
-@router.message(F.document, F.document.file_name.endswith(".txt"), IsAllowedUser())
+@router.message(F.document, F.document.file_name.endswith(".txt"), IsAdminOrAllowed())
 async def on_document_txt(msg: Message):
     uid = msg.from_user.id
     doc = msg.document
@@ -60,7 +60,7 @@ async def on_document_txt(msg: Message):
     )
 
 
-@router.message(F.text, IsAllowedUser())
+@router.message(F.text, IsAdminOrAllowed())
 async def on_text(msg: Message):
     text = (msg.text or "").strip()
     if not text or text.startswith("/"):
