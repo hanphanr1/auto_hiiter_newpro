@@ -3,11 +3,7 @@
 
 _user_lang: dict[int, str] = {}
 
-<<<<<<< HEAD
 PROOF_LINK = "https://t.me/tptth_proof"
-=======
-PROOF_LINK = "https://t.me/private_hiiter"
->>>>>>> d0bd947252bd06f8d084d5e3f35a29d058232d9e
 BRAND = "TPTTH PRIVATE HITTER"
 BY = "by @idkbroo_fr"
 SEP = "━━━━━━━━━━━━━━━━━━━━━━━━━━"
@@ -35,11 +31,7 @@ _HEADER = (
 )
 
 _FOOTER = (
-<<<<<<< HEAD
     f"\n📢 <b>Proof:</b> <a href=\"{PROOF_LINK}\">t.me/tptth_proof</a>\n"
-=======
-    f"\n📢 <b>Proof:</b> <a href=\"{PROOF_LINK}\">t.me/private_hiiter</a>\n"
->>>>>>> d0bd947252bd06f8d084d5e3f35a29d058232d9e
     f"{SEP}\n"
     f"      ⚡ <b>{BY}</b> ⚡\n"
     f"{SEP}"
