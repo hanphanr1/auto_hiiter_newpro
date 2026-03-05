@@ -5,6 +5,7 @@ from aiogram.types import Message
 
 from config import ADMIN_ID
 from user_id import is_user_allowed
+from i18n import get_lang
 
 
 class IsAdminOrAllowed(Filter):
@@ -23,7 +24,11 @@ class IsAdminOrAllowed(Filter):
 
         # Check allowed users
         if not is_user_allowed(user_id):
-            await message.answer("You don't have permission. Contact admin @idkbroo_fr")
+            lang = get_lang(user_id)
+            if lang == "vi":
+                await message.answer("Bạn không được cấp quyền hãy liên hệ với admin @idkbroo_fr")
+            else:
+                await message.answer("You don't have permission. Contact admin @idkbroo_fr")
             return False
 
         return True
