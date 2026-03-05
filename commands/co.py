@@ -9,6 +9,7 @@ import time
 from aiogram import Router
 from aiogram.types import Message
 from aiogram.filters import Command
+from filters import IsAllowedUser
 from aiogram.enums import ParseMode
 
 from card_utils import parse_cards
@@ -146,7 +147,7 @@ def _build_live_report(
     return "\n".join(lines)
 
 
-@router.message(Command("co"))
+@router.message(Command("co"), IsAllowedUser())
 async def cmd_co(msg: Message):
     text = (msg.text or "").strip()
     parts = text.split(maxsplit=3)

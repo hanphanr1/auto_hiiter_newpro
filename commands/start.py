@@ -4,16 +4,9 @@ from aiogram.types import Message, CallbackQuery, InlineKeyboardMarkup, InlineKe
 from aiogram.filters import Command
 from aiogram.enums import ParseMode
 
-from i18n import set_lang, get_lang, t
+from i18n import set_lang, get_lang, t, _LANG_KB
 
 router = Router()
-
-_LANG_KB = InlineKeyboardMarkup(inline_keyboard=[
-    [
-        InlineKeyboardButton(text="🇬🇧 English", callback_data="set_lang:en"),
-        InlineKeyboardButton(text="🇻🇳 Tiếng Việt", callback_data="set_lang:vi"),
-    ]
-])
 
 
 @router.message(Command("start"))

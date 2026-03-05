@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Internationalization module — EN / VI language support."""
+from aiogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 _user_lang: dict[int, str] = {}
 
@@ -7,6 +8,13 @@ PROOF_LINK = "https://t.me/tptth_proof"
 BRAND = "TPTTH PRIVATE HITTER"
 BY = "by @idkbroo_fr"
 SEP = "━━━━━━━━━━━━━━━━━━━━━━━━━━"
+
+_LANG_KB = InlineKeyboardMarkup(inline_keyboard=[
+    [
+        InlineKeyboardButton(text="🇬🇧 English", callback_data="set_lang:en"),
+        InlineKeyboardButton(text="🇻🇳 Tiếng Việt", callback_data="set_lang:vi"),
+    ]
+])
 
 
 def set_lang(uid: int, lang: str):

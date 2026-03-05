@@ -3,6 +3,7 @@
 from aiogram import Router
 from aiogram.types import Message
 from aiogram.filters import Command
+from filters import IsAllowedUser
 from aiogram.enums import ParseMode
 
 from proxy_manager import (
@@ -25,7 +26,7 @@ _FOOTER = (
 )
 
 
-@router.message(Command("addproxy"))
+@router.message(Command("addproxy"), IsAllowedUser())
 async def cmd_addproxy(msg: Message):
     args = (msg.text or "").split(maxsplit=1)
     uid = msg.from_user.id
@@ -78,7 +79,7 @@ async def cmd_addproxy(msg: Message):
     await status_msg.edit_text(out, parse_mode=ParseMode.HTML, disable_web_page_preview=True)
 
 
-@router.message(Command("removeproxy"))
+@router.message(Command("removeproxy"), IsAllowedUser())
 async def cmd_removeproxy(msg: Message):
     args = (msg.text or "").split(maxsplit=1)
     uid = msg.from_user.id
@@ -118,7 +119,7 @@ async def cmd_removeproxy(msg: Message):
             )
 
 
-@router.message(Command("proxy"))
+@router.message(Command("proxy"), IsAllowedUser())
 async def cmd_proxy(msg: Message):
     args = (msg.text or "").split(maxsplit=1)
     uid = msg.from_user.id
