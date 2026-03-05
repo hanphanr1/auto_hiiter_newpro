@@ -5,6 +5,7 @@ from aiogram.filters import Command
 
 from config import ADMIN_ID
 from user_id import add_user, remove_user, get_allowed_users
+from filters import IsAllowedUser
 
 router = Router()
 
@@ -16,7 +17,7 @@ def is_admin(user_id: int) -> bool:
     return user_id == ADMIN_ID
 
 
-@router.message(Command("adduser"))
+@router.message(Command("adduser"), IsAllowedUser())
 async def cmd_adduser(msg: Message):
     """Add a user to allowed list - admin only."""
     if not is_admin(msg.from_user.id):
@@ -41,7 +42,7 @@ async def cmd_adduser(msg: Message):
         await msg.answer(f"ℹ️ User <code>{user_id_to_add}</code> đã có trong danh sách.")
 
 
-@router.message(Command("removeuser"))
+@router.message(Command("removeuser"), IsAllowedUser())
 async def cmd_removeuser(msg: Message):
     """Remove a user from allowed list - admin only."""
     if not is_admin(msg.from_user.id):
@@ -65,7 +66,7 @@ async def cmd_removeuser(msg: Message):
         await msg.answer(f"ℹ️ User <code>{user_id_to_remove}</code> không có trong danh sách.")
 
 
-@router.message(Command("listusers"))
+@router.message(Command("listusers"), IsAllowedUser())
 async def cmd_listusers(msg: Message):
     """List all allowed users - admin only."""
     if not is_admin(msg.from_user.id):
