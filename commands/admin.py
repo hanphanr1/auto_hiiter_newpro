@@ -5,14 +5,23 @@ from aiogram.filters import Command
 
 from config import ADMIN_ID
 from user_id import add_user, remove_user, get_allowed_users
-from filters import IsAdmin
+import logging
+
+logger = logging.getLogger(__name__)
 
 router = Router()
 
 
 def is_admin(user_id: int) -> bool:
     """Check if user is admin."""
+    logger.info(f"Checking admin: {user_id} vs {ADMIN_ID}")
     return user_id == ADMIN_ID
+
+
+@router.message(Command("admin"))
+async def cmd_admin(msg: Message):
+    """Test admin command."""
+    await msg.answer(f"Admin ID: {ADMIN_ID}\nYour ID: {msg.from_user.id}\nIs admin: {is_admin(msg.from_user.id)}")
 
 
 @router.message(Command("adduser"))
