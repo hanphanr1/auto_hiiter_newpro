@@ -4,7 +4,7 @@ from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 from aiogram.types import Message
-from aiogram.dispatcher.middlewares import Middleware
+from aiogram.dispatcher.middlewares.base import BaseMiddleware
 
 from config import BOT_TOKEN, ADMIN_ID
 from commands import router
@@ -19,31 +19,29 @@ dp = Dispatcher()
 dp.include_router(router)
 
 
-class UserPermissionMiddleware(Middleware):
+class UserPermissionMiddleware(BaseMiddleware):
     """Middleware to check if user is allowed to use the bot."""
 
-    async def __call__(self, handler, event: Message, data: dict):
-        user_id = event.from_user.id
+    async def pre_process_message(self, message: Message, data: dict):
+        user_id = message.from_user.id
 
         # Allow /start command to let user choose language first
-        if event.text and event.text.strip().startswith("/start"):
-            return await handler(event, data)
+        if message.text and message.text.strip().startswith("/start"):
+            return
 
         # Allow admin to use all commands
         if user_id == ADMIN_ID:
-            return await handler(event, data)
+            return
 
         # Check if user is in allowed list
         if not is_user_allowed(user_id):
             # Check user language for response
             lang = get_lang(user_id)
             if lang == "vi":
-                await event.answer("Bạn không được cấp quyền hãy liên hệ với admin @idkbroo_fr")
+                await message.answer("Bạn không được cấp quyền hãy liên hệ với admin @idkbroo_fr")
             else:
-                await event.answer("You don't have permission. Please contact the admin @idkbroo_fr.")
-            return
-
-        return await handler(event, data)
+                await message.answer("You don't have permission. Please contact the admin @idkbroo_fr.")
+            raise asyncio.CancelledError()
 
 
 # Register middleware
