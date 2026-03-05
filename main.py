@@ -1,19 +1,34 @@
 # -*- coding: utf-8 -*-
 import asyncio
+import logging
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
 
 from config import BOT_TOKEN, ADMIN_ID
-from commands import router
+from commands.start import router as start_router
+from commands.admin import router as admin_router
+from commands.proxy_cmd import router as proxy_router
+from commands.co import router as co_router
+from commands.filter_cc import router as filter_cc_router
+
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 if not BOT_TOKEN:
     raise SystemExit("Set BOT_TOKEN in environment.")
 
 bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTML))
 dp = Dispatcher()
-dp.include_router(router)
 
+# Register all routers
+dp.include_router(start_router)
+dp.include_router(admin_router)
+dp.include_router(proxy_router)
+dp.include_router(co_router)
+dp.include_router(filter_cc_router)
+
+logger.info(f"Starting bot with ADMIN_ID: {ADMIN_ID}")
 
 async def main():
     try:
