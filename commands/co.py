@@ -45,7 +45,8 @@ def _mask_cc(card_str: str) -> str:
     if not parts:
         return "XXXX"
     cc = parts[0]
-    masked = "X" * (len(cc) - 4) + cc[-4:] if len(cc) >= 4 else "XXXX"
+    # Chỉ hiển thị last 2 digits để tránh ban
+    masked = "X" * (len(cc) - 2) + cc[-2:] if len(cc) >= 2 else "XXXX"
     parts[0] = masked
     for i in range(1, len(parts)):
         parts[i] = "XX"
