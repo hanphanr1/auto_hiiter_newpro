@@ -1,0 +1,5 @@
+# Telegram Scraper Dependencies
+
+# Install with: pip install -r requirements.txt
+
+telethon>=1.24.0
