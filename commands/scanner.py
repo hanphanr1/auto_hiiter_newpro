@@ -29,8 +29,12 @@ logger = logging.getLogger(__name__)
 router = Router()
 
 # Scanner config path
-SCANNER_CONFIG = os.path.join(os.path.dirname(__file__), "..", "scraper", "config.json")
-SCANNER_SESSION = os.path.join(os.path.dirname(__file__), "..", "scraper", "scanner_bot_session.session")
+SCANNER_DIR = os.path.join(os.path.dirname(__file__), "..", "scraper")
+SCANNER_CONFIG = os.path.join(SCANNER_DIR, "config.json")
+SCANNER_SESSION = os.path.join(SCANNER_DIR, "scanner_bot_session.session")
+
+# Ensure scraper directory exists
+os.makedirs(SCANNER_DIR, exist_ok=True)
 
 # Default regex patterns
 DEFAULT_PATTERNS = {
@@ -172,9 +176,10 @@ async def cmd_scan(msg: Message):
 async def cmd_scan_setup(msg: Message):
     """Setup scanner API credentials."""
     uid = msg.from_user.id
+    logger.info(f"scan_setup called by {uid}, ADMIN_ID={ADMIN_ID}")
 
-    if not is_admin(uid):
-        await msg.answer("Chỉ admin mới được dùng tính năng này.")
+    if uid != ADMIN_ID:
+        await msg.answer(f"Chỉ admin mới được dùng. Your ID: {uid}")
         return
 
     await msg.answer(
@@ -186,6 +191,7 @@ async def cmd_scan_setup(msg: Message):
     )
 
     user_states[uid] = {"step": "api_id", "action": "setup"}
+    logger.info(f"User {uid} state set to scan_setup")
 
 
 @router.message(Command("scan_session"))
