@@ -243,24 +243,35 @@ async def cmd_scan_session(msg: Message):
                 f"\n{SEP}",
                 parse_mode=ParseMode.HTML,
             )
-        else:
-            await msg.answer(
-                f"{SEP}\n"
-                "📱 <b>Đăng nhập mới</b>\n\n"
-                "Gửi code request..."
-                f"\n{SEP}",
-                parse_mode=ParseMode.HTML,
-            )
-            await client.send_code_request(config["phone"])
+            await client.disconnect()
+            return
 
-            await msg.answer(
-                f"{SEP}\n"
-                "🔢 <b>Nhập code</b>\n\n"
-                "Nhập mã xác thực từ Telegram:"
-                f"\n{SEP}",
-                parse_mode=ParseMode.HTML,
-            )
-            user_states[uid] = {"step": "auth_code", "action": "login", "client": client}
+        # Not authorized - send code
+        await msg.answer(
+            f"{SEP}\n"
+            "📱 <b>Đăng nhập mới</b>\n\n"
+            "Gửi code request..."
+            f"\n{SEP}",
+            parse_mode=ParseMode.HTML,
+        )
+        await client.send_code_request(config["phone"])
+
+        await msg.answer(
+            f"{SEP}\n"
+            "🔢 <b>Nhập code</b>\n\n"
+            "Nhập mã xác thực từ Telegram:"
+            f"\n{SEP}",
+            parse_mode=ParseMode.HTML,
+        )
+        # Save client and phone - DON'T disconnect yet
+        user_states[uid] = {
+            "step": "auth_code",
+            "action": "login",
+            "client": client,
+            "phone": config["phone"]
+        }
+        # Return without disconnecting - keep connection alive!
+        return
 
     except Exception as e:
         logger.error(f"Session error: {e}")
@@ -270,7 +281,6 @@ async def cmd_scan_session(msg: Message):
             f"\n{SEP}",
             parse_mode=ParseMode.HTML,
         )
-    finally:
         if client:
             await client.disconnect()
 
@@ -493,6 +503,10 @@ async def handle_scan_input(msg: Message):
                 f"\n{SEP}",
                 parse_mode=ParseMode.HTML,
             )
+            await client.disconnect()
+            if uid in user_states:
+                del user_states[uid]
+            return
         except SessionPasswordNeededError:
             user_states[uid]["step"] = "2fa"
             await msg.answer(
@@ -502,6 +516,7 @@ async def handle_scan_input(msg: Message):
                 f"\n{SEP}",
                 parse_mode=ParseMode.HTML,
             )
+            return  # Don't disconnect - still need 2FA
         except Exception as e:
             await msg.answer(
                 f"{SEP}\n"
@@ -509,34 +524,38 @@ async def handle_scan_input(msg: Message):
                 f"\n{SEP}",
                 parse_mode=ParseMode.HTML,
             )
-        finally:
             await client.disconnect()
-
-        if uid in user_states:
-            del user_states[uid]
+            if uid in user_states:
+                del user_states[uid]
 
     elif state.get("action") == "login" and state.get("step") == "2fa":
         client = state.get("client")
-        if client:
-            try:
-                await client.sign_in(password=text)
-                await msg.answer(
-                    f"{SEP}\n"
-                    "✅ <b>Đăng nhập 2FA thành công!</b>"
-                    f"\n{SEP}",
-                    parse_mode=ParseMode.HTML,
-                )
-            except Exception as e:
-                await msg.answer(
-                    f"{SEP}\n"
-                    f"❌ Lỗi: {str(e)}"
-                    f"\n{SEP}",
-                    parse_mode=ParseMode.HTML,
-                )
-            finally:
-                await client.disconnect()
-        if uid in user_states:
-            del user_states[uid]
+        if not client:
+            await msg.answer("Lỗi client. Dùng /scan_session lại.")
+            return
+
+        try:
+            await client.sign_in(password=text)
+            await msg.answer(
+                f"{SEP}\n"
+                "✅ <b>Đăng nhập 2FA thành công!</b>"
+                f"\n{SEP}",
+                parse_mode=ParseMode.HTML,
+            )
+            await client.disconnect()
+            if uid in user_states:
+                del user_states[uid]
+            return
+        except Exception as e:
+            await msg.answer(
+                f"{SEP}\n"
+                f"❌ Lỗi: {str(e)}"
+                f"\n{SEP}",
+                parse_mode=ParseMode.HTML,
+            )
+            await client.disconnect()
+            if uid in user_states:
+                del user_states[uid]
 
     # === SCAN FLOW ===
     elif state.get("action") == "scan":
