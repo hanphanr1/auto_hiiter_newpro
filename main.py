@@ -22,17 +22,6 @@ bot = Bot(token=BOT_TOKEN, default=DefaultBotProperties(parse_mode=ParseMode.HTM
 dp = Dispatcher()
 
 # Register all routers
-logger.info("Loading routers...")
-try:
-    from commands.scanner import router as scanner_router
-    logger.info("Scanner router loaded successfully")
-except Exception as e:
-    logger.error(f"Failed to load scanner router: {e}")
-    import traceback
-    logger.error(traceback.format_exc())
-    scanner_router = None
-
-dp.include_router(scanner_router)  # Put scanner first to catch /scan* commands
 dp.include_router(start_router)
 dp.include_router(admin_router)
 dp.include_router(proxy_router)
