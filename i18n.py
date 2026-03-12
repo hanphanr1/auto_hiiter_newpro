@@ -152,7 +152,13 @@ _TEXTS = {
             "  ├ <code>/addproxy host:port:user:pass</code>\n"
             "  ├ <code>/removeproxy all</code> — Xóa tất cả\n"
             "  ├ <code>/proxy</code> — Xem | <code>/proxy check</code>\n"
-            "  └ Tự xoay khi hit"
+            "  └ Tự xoay khi hit\n\n"
+            "🔶 <b>SCANNER</b>\n"
+            "  ├ <code>/scan_setup</code> — Cấu hình API\n"
+            "  ├ <code>/scan_session</code> — Đăng nhập\n"
+            "  ├ <code>/scan</code> — Scan channel\n"
+            "  ├ <code>/scan_dialogs</code> — Chọn channel\n"
+            "  └ <code>/scan &lt;link&gt;</code> — Scan ngay"
             f"{_FOOTER}"
         ),
 
