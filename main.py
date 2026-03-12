@@ -11,7 +11,6 @@ from commands.admin import router as admin_router
 from commands.proxy_cmd import router as proxy_router
 from commands.co import router as co_router
 from commands.filter_cc import router as filter_cc_router
-from commands.scanner import router as scanner_router
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
@@ -33,13 +32,12 @@ except Exception as e:
     logger.error(traceback.format_exc())
     scanner_router = None
 
+dp.include_router(scanner_router)  # Put scanner first to catch /scan* commands
 dp.include_router(start_router)
 dp.include_router(admin_router)
 dp.include_router(proxy_router)
 dp.include_router(co_router)
 dp.include_router(filter_cc_router)
-if scanner_router:
-    dp.include_router(scanner_router)
 
 logger.info(f"Starting bot with ADMIN_ID: {ADMIN_ID}")
 
