@@ -479,12 +479,13 @@ async def handle_scan_input(msg: Message):
     # === LOGIN FLOW ===
     elif state.get("action") == "login" and state.get("step") == "auth_code":
         client = state.get("client")
+        phone = state.get("phone") or load_scanner_config().get("phone") if load_scanner_config() else None
         if not client:
             await msg.answer("Lỗi client. Dùng /scan_session lại.")
             return
 
         try:
-            await client.sign_in(config.get("phone"), text)
+            await client.sign_in(phone, text)
             await msg.answer(
                 f"{SEP}\n"
                 "✅ <b>Đăng nhập thành công!</b>\n\n"
