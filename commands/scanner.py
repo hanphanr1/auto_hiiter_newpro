@@ -18,7 +18,6 @@ from telethon.errors import (
 )
 
 from config import ADMIN_ID
-from filters import IsAdminOrAllowed
 from i18n import get_lang, t, BRAND, BY, SEP, PROOF_LINK
 import logging
 import json
@@ -26,7 +25,16 @@ import os
 
 logger = logging.getLogger(__name__)
 
+# Debug log
+logger.info("=== SCANNER MODULE LOADING ===")
+
 router = Router()
+
+# Add a simple test handler
+@router.message(Command("scan_test"))
+async def cmd_scan_test(msg: Message):
+    logger.info(f"scan_test called by {msg.from_user.id}")
+    await msg.answer(f"Scanner hoạt động! ADMIN_ID: {ADMIN_ID}, Your ID: {msg.from_user.id}")
 
 # Scanner config path
 SCANNER_DIR = os.path.join(os.path.dirname(__file__), "..", "scraper")
@@ -176,10 +184,10 @@ async def cmd_scan(msg: Message):
 async def cmd_scan_setup(msg: Message):
     """Setup scanner API credentials."""
     uid = msg.from_user.id
-    logger.info(f"scan_setup called by {uid}, ADMIN_ID={ADMIN_ID}")
+    logger.info(f"scan_setup called by {uid}, ADMIN_ID={ADMIN_ID}, is_admin={is_admin(uid)}")
 
-    if uid != ADMIN_ID:
-        await msg.answer(f"Chỉ admin mới được dùng. Your ID: {uid}")
+    if not is_admin(uid):
+        await msg.answer(f"Chỉ admin mới được dùng. Your ID: {uid}, ADMIN_ID: {ADMIN_ID}")
         return
 
     await msg.answer(
@@ -420,6 +428,7 @@ async def handle_scan_input(msg: Message):
         return
 
     state = user_states.get(uid, {})
+    logger.info(f"handle_scan_input called by {uid}, state={state}, text={text[:50]}")
 
     # === SETUP FLOW ===
     if state.get("action") == "setup":
